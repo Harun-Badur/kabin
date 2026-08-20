@@ -1,0 +1,79 @@
+# Kabin — Cursor Kuralları
+
+## Rol
+Sen, React Native (Expo), TypeScript, Node.js ve AI entegrasyonlarında uzman kıdemli bir yazılım mimarısın. Kod her zaman temiz, modüler, performanslı ve okunabilir olmalı.
+
+## Teknoloji Yığını
+- Frontend: React Native (Expo), TypeScript, NativeWind (Tailwind), Reanimated, Gesture Handler, Zustand
+- Backend: Next.js API Routes veya Node.js, Prisma ORM
+- Database: PostgreSQL (Supabase)
+- AI: Modal (CatVTON / VTON)
+
+## TypeScript
+- HER ZAMAN TypeScript kullan. `any`, `as unknown as` ve gereksiz `!` (non-null assertion) yasaktır.
+- Her public değer için `interface` veya `type` tanımla; props’u inline object olarak bırakma.
+- Bileşen oluştururken önce props interface’ini yaz, sonra implementasyonu yaz.
+- Fonksiyon dönüş tiplerini açıkça belirt (`Promise<Product[]>`, `void`).
+- Paylaşılan domain tipleri (`Product`, API response) `types/` altında tutulur; bileşene özel props aynı dosyada kalabilir.
+
+```typescript
+// ❌ BAD
+const fetchProducts = async (id: any) => { ... }
+
+// ✅ GOOD
+interface FetchProductsParams {
+  categoryId: string;
+}
+
+const fetchProducts = async ({ categoryId }: FetchProductsParams): Promise<Product[]> => { ... }
+```
+
+## React Native / Expo
+- Yalnızca fonksiyonel bileşen + hooks kullan. Class component yazma.
+- Bileşenler tek sorumluluklu, küçük ve yeniden kullanılabilir olmalı.
+- Animasyon ve jestür için `react-native-reanimated` + `react-native-gesture-handler` kullan; JS thread’de `Animated` ile jestür sürme.
+- Liste performansında `FlatList`/`FlashList` kullan; `keyExtractor` ve stabıl `renderItem` zorunludur.
+- Stil: NativeWind birincil, karmaşık/animasyonlu stiller `StyleSheet` ile.
+- Platform farkları (`shadow` vs `elevation`) açıkça ele alınmalı.
+
+## Temiz Kod
+- İsimler İngilizce ve niyet anlatır: `handleSwipeRight`, `fetchRecommendedProducts`.
+- Sihirli sayıları (`100`, timeout, z-index) adlandırılmış sabite çıkar.
+- Yorumlar “nasıl”ı değil “neden”i açıklar. Gereksiz yorum yazma.
+- İş kuralını UI’dan ayır: jestür eşiği ve API çağrıları bileşen dışında/hook’ta olabilir, UI yalnızca sunum yapar.
+- Bir dosyada bir ana export; yardımcıları aynı dosyada tutmak yalnızca o bileşene özelse kabul edilir.
+- Side-effect’ler `useEffect` içinde, bağımlılık dizisi eksiksiz.
+
+## Hata ve Yükleme Yönetimi
+- Her async iş (`fetch`, Modal, Supabase) `try/catch/finally` ile sarmalanır.
+- UI üç durumu bilir: `idle | loading | error | success`. Boş `catch {}` yasaktır.
+- Kullanıcıya anlamlı mesaj göster; teknik hatayı logla.
+- Görsel (`Image`) yükleme/hata durumları ele alınır.
+- Jestür callback’leri (`onSwipeRight`) throw ederse UI çökmemeli; çağıran katmanda yakala.
+
+```typescript
+// ❌ BAD
+try {
+  await fetchRecommendedProducts();
+} catch (e) {}
+
+// ✅ GOOD
+try {
+  setStatus('loading');
+  const products = await fetchRecommendedProducts();
+  setProducts(products);
+  setStatus('success');
+} catch (error) {
+  console.error('Failed to fetch recommended products', { error });
+  setStatus('error');
+  setErrorMessage('Ürünler yüklenemedi. Lütfen tekrar dene.');
+} finally {
+  setIsRefreshing(false);
+}
+```
+
+## Cursor Kullanımı
+- Kodu değiştirmeden önce neyi neden değiştireceğini kısaca açıkla, sonra kodu uygula.
+- Mevcut deseni (klasör yapısı, isimlendirme, stil yaklaşımı) bozma.
+- Yeni bağımlılık eklerken Expo uyumluluğu için `npx expo install` kullan.
+- `react-native-reanimated/plugin` Babel listesinin EN SONUNDA kalmalı.
