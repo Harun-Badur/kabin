@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hmac
 import io
 import logging
 import os
@@ -19,6 +20,9 @@ INFERENCE_STEPS = 30
 IMAGE_SIZE = (768, 1024)
 REQUEST_TIMEOUT_SEC = 120
 IDLE_TIMEOUT_SEC = 300
+SECRET_HEADER = "X-Kabin-Secret"
+SECRET_ENV_VAR = "KABIN_VTON_SECRET"
+PUBLIC_PATHS = frozenset({"/health"})
 
 logger = logging.getLogger("kabin-vton")
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +30,9 @@ logging.basicConfig(level=logging.INFO)
 app = modal.App(APP_NAME)
 
 hf_cache_volume = modal.Volume.from_name("kabin-vton-hf-cache", create_if_missing=True)
+
+# modal secret create kabin-vton-secret KABIN_VTON_SECRET=<rastgele-uzun-dize>
+vton_secret = modal.Secret.from_name("kabin-vton-secret")
 
 vton_image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -163,6 +170,7 @@ def _encode_png_base64(image: "Image.Image") -> str:
     scaledown_window=IDLE_TIMEOUT_SEC,
     min_containers=0,
     volumes={HF_CACHE_DIR: hf_cache_volume},
+    secrets=[vton_secret],
 )
 class TryOnService:
     """Loads CatVTON once per container, then serves FastAPI /tryon."""
@@ -298,10 +306,40 @@ class TryOnService:
 
     @modal.asgi_app()
     def fastapi_app(self) -> Any:
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI, HTTPException, Request
+        from fastapi.responses import JSONResponse
 
         web = FastAPI(title="Kabin VTON", version="1.0.0")
         service = self
+
+        @web.middleware("http")
+        async def require_shared_secret(request: Request, call_next: Any) -> Any:
+            """Sağlık kontrolü dışındaki tüm yollarda paylaşılan sırrı doğrula.
+
+            Endpoint herkese açık bir URL'de yayınlandığı için tek koruma
+            katmanı bu başlıktır; Edge Function proxy'si dışındaki çağrılar
+            401 alır.
+            """
+            if request.url.path in PUBLIC_PATHS:
+                return await call_next(request)
+
+            expected = os.environ.get(SECRET_ENV_VAR, "")
+            if not expected:
+                logger.error("%s tanımlı değil; istek reddedildi.", SECRET_ENV_VAR)
+                return JSONResponse(
+                    status_code=503,
+                    content={"detail": "Servis yapılandırılmamış."},
+                )
+
+            provided = request.headers.get(SECRET_HEADER, "")
+            if not hmac.compare_digest(provided, expected):
+                logger.warning("Geçersiz %s başlığı reddedildi.", SECRET_HEADER)
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Yetkisiz istek."},
+                )
+
+            return await call_next(request)
 
         @web.post(
             "/tryon",

@@ -3,8 +3,10 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -19,6 +21,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { ImageIcon, RotateCcw, Sparkles, X } from 'lucide-react-native';
+import { grantVtonConsent, hasVtonConsent } from '../lib/consent';
+import { PRIVACY_URL } from '../lib/privacy';
 import {
   tryOnGarment,
   VtonServiceError,
@@ -27,6 +31,8 @@ import type { Product } from '../types/product';
 import type { TryOnStatus } from '../types/vton';
 
 const IMAGE_MAX_WIDTH = 768;
+
+type ConsentStatus = 'checking' | 'required' | 'granted';
 
 export interface VirtualTryOnModalProps {
   visible: boolean;
@@ -45,8 +51,26 @@ export default function VirtualTryOnModal({
   const [errorMessage, setErrorMessage] = useState(resetMessage);
   const [personImageUri, setPersonImageUri] = useState<string | null>(null);
   const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
+  const [consentStatus, setConsentStatus] = useState<ConsentStatus>('checking');
 
   const pulse = useSharedValue(0.55);
+
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    let isMounted = true;
+    void hasVtonConsent().then((granted) => {
+      if (isMounted) {
+        setConsentStatus(granted ? 'granted' : 'required');
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [visible]);
 
   useEffect(() => {
     if (status === 'loading') {
@@ -159,8 +183,99 @@ export default function VirtualTryOnModal({
     setResultImageUrl(null);
   }, []);
 
+  const handleAcceptConsent = useCallback((): void => {
+    setConsentStatus('granted');
+    void grantVtonConsent();
+  }, []);
+
+  const handleOpenPrivacy = useCallback((): void => {
+    void Linking.openURL(PRIVACY_URL).catch((error: unknown) => {
+      console.error('Gizlilik politikası açılamadı', { error });
+      Alert.alert(
+        'Bağlantı açılamadı',
+        'Gizlilik politikası bu cihazda açılamadı.',
+      );
+    });
+  }, []);
+
   if (!product) {
     return null;
+  }
+
+  if (consentStatus !== 'granted') {
+    return (
+      <Modal
+        visible={visible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={handleClose}
+      >
+        <View style={styles.screen}>
+          {consentStatus === 'checking' ? (
+            <View style={styles.centerBlock}>
+              <ActivityIndicator color="#F8FAFC" size="large" />
+            </View>
+          ) : (
+            <>
+              <ScrollView contentContainerStyle={styles.consentBody}>
+                <Text style={styles.kicker}>Sanal deneme</Text>
+                <Text style={styles.consentTitle}>
+                  Fotoğrafın nasıl işlenir?
+                </Text>
+                <Text style={styles.consentLead}>
+                  Fotoğrafın yalnızca bu deneme için işlenir ve saklanmaz.
+                </Text>
+                <Text style={styles.consentItem}>
+                  • Seçtiğin fotoğraf, giydirme işlemini yapan yapay zekâ
+                  servisimize (Modal.com, GPU) şifreli bağlantı üzerinden
+                  gönderilir.
+                </Text>
+                <Text style={styles.consentItem}>
+                  • İşlem bittiğinde fotoğraf sunucuda tutulmaz; sonuç görseli
+                  yalnızca senin cihazında gösterilir.
+                </Text>
+                <Text style={styles.consentItem}>
+                  • Fotoğrafın reklam, model eğitimi veya üçüncü taraflarla
+                  paylaşım için kullanılmaz.
+                </Text>
+                <Text style={styles.consentItem}>
+                  • Bu izni istediğin zaman uygulamayı kaldırarak ya da
+                  hesabını silerek geri alabilirsin.
+                </Text>
+                <Pressable
+                  onPress={handleOpenPrivacy}
+                  accessibilityRole="link"
+                  accessibilityLabel="Gizlilik Politikası"
+                >
+                  <Text style={styles.consentLink}>Gizlilik Politikası</Text>
+                </Pressable>
+              </ScrollView>
+
+              <View style={styles.footer}>
+                <View style={styles.footerRow}>
+                  <Pressable
+                    onPress={handleClose}
+                    style={styles.secondaryButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Vazgeç"
+                  >
+                    <Text style={styles.secondaryButtonText}>Vazgeç</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleAcceptConsent}
+                    style={styles.primaryButton}
+                    accessibilityRole="button"
+                    accessibilityLabel="Kabul Et"
+                  >
+                    <Text style={styles.primaryButtonText}>Kabul Et</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </>
+          )}
+        </View>
+      </Modal>
+    );
   }
 
   return (
@@ -417,6 +532,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
+  },
+  consentBody: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+  },
+  consentTitle: {
+    color: '#F8FAFC',
+    fontSize: 26,
+    fontWeight: '800',
+    marginBottom: 12,
+  },
+  consentLead: {
+    color: '#F8FAFC',
+    fontSize: 17,
+    fontWeight: '700',
+    lineHeight: 25,
+    marginBottom: 18,
+  },
+  consentItem: {
+    color: '#CBD5E1',
+    fontSize: 15,
+    lineHeight: 23,
+    marginBottom: 12,
+  },
+  consentLink: {
+    color: '#F8FAFC',
+    fontSize: 15,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+    marginTop: 8,
   },
   loadingOrb: {
     width: 88,

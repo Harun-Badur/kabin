@@ -1,11 +1,15 @@
 import { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { PRIVACY_URL } from '../lib/privacy';
+import { deleteAccount } from '../services/accountService';
 import type { AuthUser } from '../types/auth';
 
 interface ProfileScreenProps {
@@ -18,7 +22,10 @@ export default function ProfileScreen({
   onSignOut,
 }: ProfileScreenProps) {
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const isBusy = isSigningOut || isDeleting;
 
   const handleSignOut = async (): Promise<void> => {
     setIsSigningOut(true);
@@ -32,6 +39,49 @@ export default function ProfileScreen({
     } finally {
       setIsSigningOut(false);
     }
+  };
+
+  const runDeleteAccount = async (): Promise<void> => {
+    setIsDeleting(true);
+    setErrorMessage(null);
+    try {
+      await deleteAccount();
+      await onSignOut();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Hesap silinemedi.';
+      setErrorMessage(message);
+      Alert.alert('Hesap silinemedi', message);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteAccount = (): void => {
+    Alert.alert(
+      'Hesabımı sil',
+      'Hesabın ve tüm verilerin (beğeniler, geçilen ürünler, fiyat alarmları, bildirim kayıtları) kalıcı olarak silinecek. Bu işlem geri alınamaz.',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Kalıcı olarak sil',
+          style: 'destructive',
+          onPress: () => {
+            void runDeleteAccount();
+          },
+        },
+      ],
+    );
+  };
+
+  const handleOpenPrivacy = (): void => {
+    void Linking.openURL(PRIVACY_URL).catch((error: unknown) => {
+      console.error('Gizlilik politikası açılamadı', { error });
+      Alert.alert(
+        'Bağlantı açılamadı',
+        'Gizlilik politikası bu cihazda açılamadı.',
+      );
+    });
   };
 
   return (
@@ -48,13 +98,24 @@ export default function ProfileScreen({
           <Text style={styles.error}>{errorMessage}</Text>
         ) : null}
         <Pressable
+          onPress={handleOpenPrivacy}
+          style={({ pressed }) => [
+            styles.linkButton,
+            pressed ? styles.pressed : null,
+          ]}
+          accessibilityRole="link"
+          accessibilityLabel="Gizlilik politikası"
+        >
+          <Text style={styles.linkButtonText}>Gizlilik Politikası</Text>
+        </Pressable>
+        <Pressable
           onPress={() => {
             void handleSignOut();
           }}
-          disabled={isSigningOut}
+          disabled={isBusy}
           style={({ pressed }) => [
             styles.signOut,
-            pressed || isSigningOut ? styles.pressed : null,
+            pressed || isBusy ? styles.pressed : null,
           ]}
           accessibilityRole="button"
           accessibilityLabel="Çıkış yap"
@@ -63,6 +124,30 @@ export default function ProfileScreen({
             <ActivityIndicator color="#DC2626" />
           ) : (
             <Text style={styles.signOutText}>Çıkış yap</Text>
+          )}
+        </Pressable>
+      </View>
+
+      <View style={styles.dangerCard}>
+        <Text style={styles.dangerTitle}>Hesabı sil</Text>
+        <Text style={styles.dangerHint}>
+          Hesabın ve tüm verilerin kalıcı olarak silinir. Bu işlem geri
+          alınamaz.
+        </Text>
+        <Pressable
+          onPress={handleDeleteAccount}
+          disabled={isBusy}
+          style={({ pressed }) => [
+            styles.deleteButton,
+            pressed || isBusy ? styles.pressed : null,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Hesabımı sil"
+        >
+          {isDeleting ? (
+            <ActivityIndicator color="#F8FAFC" />
+          ) : (
+            <Text style={styles.deleteButtonText}>Hesabımı Sil</Text>
           )}
         </Pressable>
       </View>
@@ -118,6 +203,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 12,
   },
+  linkButton: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  linkButtonText: {
+    color: '#0F172A',
+    fontSize: 15,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
   signOut: {
     borderWidth: 1,
     borderColor: '#FECACA',
@@ -127,6 +223,37 @@ const styles = StyleSheet.create({
   },
   signOutText: {
     color: '#DC2626',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  dangerCard: {
+    marginTop: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  dangerTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#B91C1C',
+    marginBottom: 6,
+  },
+  dangerHint: {
+    fontSize: 14,
+    lineHeight: 21,
+    color: '#64748B',
+    marginBottom: 16,
+  },
+  deleteButton: {
+    backgroundColor: '#DC2626',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  deleteButtonText: {
+    color: '#F8FAFC',
     fontSize: 16,
     fontWeight: '800',
   },

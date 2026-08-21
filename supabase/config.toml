@@ -1,0 +1,11 @@
+# Proje referansı Supabase URL'sinin alt alanıdır; gizli bilgi değildir.
+project_id = "hnujkabyyrlsxohjhxlg"
+
+# Platform katmanı da JWT arar (savunma derinliği). Fonksiyonlar ayrıca
+# supabase.auth.getUser ile kullanıcıyı kendisi doğrular; anon key tek başına
+# yeterli değildir.
+[functions.vton-proxy]
+verify_jwt = true
+
+[functions.delete-account]
+verify_jwt = true

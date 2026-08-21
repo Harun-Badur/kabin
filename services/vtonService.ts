@@ -4,6 +4,7 @@ import {
   readAsStringAsync,
 } from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { getRequiredSupabaseClient } from '../lib/supabase';
 import type { GarmentCategory, TryOnOptions } from '../types/vton';
 
 const IMAGE_MAX_WIDTH = 768;
@@ -42,19 +43,35 @@ const summarizeBody = (body: string): string => {
   return `${compact.slice(0, BODY_SUMMARY_LIMIT)}…`;
 };
 
-const getModalVtonUrl = (): string => {
-  const url = process.env.EXPO_PUBLIC_MODAL_VTON_URL?.trim().replace(
-    /\/+$/,
-    '',
-  );
+const getVtonProxyUrl = (): string => {
+  const url = process.env.EXPO_PUBLIC_VTON_PROXY_URL?.trim().replace(/\/+$/, '');
 
   if (!url) {
     throw new VtonServiceError(
-      'Modal VTON adresi eksik. .env içinde EXPO_PUBLIC_MODAL_VTON_URL tanımla.',
+      'Sanal deneme adresi eksik. .env içinde EXPO_PUBLIC_VTON_PROXY_URL tanımla.',
     );
   }
 
   return url;
+};
+
+const getAccessToken = async (): Promise<string> => {
+  const client = getRequiredSupabaseClient();
+  const { data, error } = await client.auth.getSession();
+
+  if (error) {
+    console.error('Oturum tokenı okunamadı', { message: error.message });
+    throw new VtonServiceError(
+      'Oturum doğrulanamadı. Çıkıp tekrar giriş yapmayı dene.',
+    );
+  }
+
+  const token = data.session?.access_token?.trim();
+  if (!token) {
+    throw new VtonServiceError('Sanal deneme için giriş yapmalısın.');
+  }
+
+  return token;
 };
 
 const toClothType = (
@@ -102,7 +119,17 @@ const extractDetail = (body: string): string => {
 
 const throwHttpError = (status: number, body: string): never => {
   const detail = extractDetail(body);
-  console.error('Modal VTON request failed', { status, detail });
+  console.error('VTON isteği başarısız', { status, detail });
+
+  if (status === 401 || status === 403) {
+    throw new VtonServiceError(
+      'Sanal deneme için oturumun doğrulanamadı. Çıkıp tekrar giriş yap.',
+    );
+  }
+
+  if (status === 429) {
+    throw new VtonServiceError(detail);
+  }
 
   if (status === 400) {
     throw new VtonServiceError(
@@ -182,7 +209,8 @@ export const tryOnGarment = async (
   options: TryOnOptions,
 ): Promise<string> => {
   try {
-    const endpoint = `${getModalVtonUrl()}/tryon`;
+    const endpoint = getVtonProxyUrl();
+    const accessToken = await getAccessToken();
     const preparedUri = await limitPersonImage(personImageUri);
     const personImageBase64 = await readImageAsBase64(preparedUri);
 
@@ -204,6 +232,7 @@ export const tryOnGarment = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(payload),
     });
