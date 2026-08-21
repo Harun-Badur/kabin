@@ -28,6 +28,13 @@
         {
           "photosPermission": "Sanal deneme için galerindeki fotoğraflara erişmemiz gerekiyor."
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0F172A"
+        }
       ]
     ]
   }

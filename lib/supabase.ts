@@ -24,3 +24,13 @@ export const getSupabaseClient = (): SupabaseClient | null => {
 
   return client;
 };
+
+export const getRequiredSupabaseClient = (): SupabaseClient => {
+  const required = getSupabaseClient();
+  if (required === null) {
+    throw new Error(
+      'Supabase yapılandırması eksik. .env içinde EXPO_PUBLIC_SUPABASE_URL ve EXPO_PUBLIC_SUPABASE_ANON_KEY tanımlı olmalı.',
+    );
+  }
+  return required;
+};

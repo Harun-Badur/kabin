@@ -9,6 +9,7 @@
 - AI sanal deneme (CatVTON, Modal GPU)
 - Trendyol ve Hepsiburada derin bağlantıları (kanonikal ürün URL)
 - Supabase ürün feed’i; bağlantı yoksa yerel mock katalog
+- Fiyat takibi (MVP: manuel/script) ve Expo push token kaydı
 
 ## Tech stack
 
@@ -56,7 +57,10 @@ Uygulama yalnızca `EXPO_PUBLIC_*` değişkenlerini görür. `SUPABASE_SERVICE_R
 | `SUPABASE_SERVICE_ROLE_KEY` | Yalnızca script | Feed import / seed. `EXPO_PUBLIC_` **olmaz** |
 | `AFFILIATE_TAGS_JSON` | Script | Seed tarafı etiketleri |
 
-Şema: `supabase/schema_products.sql` dosyasını Supabase SQL Editor’de çalıştır.
+Şema sırası (SQL Editor):
+1. `supabase/schema_products.sql`
+2. `supabase/schema.sql`
+3. `supabase/price_tracking.sql`
 
 ### Geliştirme sunucusu
 
@@ -66,6 +70,18 @@ npx expo start
 ```
 
 Cache temizlemek için: `npx expo start -c`
+
+### Fiyat düşüşü testi (MVP, scraping yok)
+
+İlk katalog ürününün `current_price` değerini %10 düşürür, ilgili beğenilere `price_alerts` yazar. Push varsayılan **dry-run**:
+
+```bash
+npx ts-node scripts/simulate-price-drop.ts
+```
+
+Aynı komut proje içinde `tsx` ile de çalışır: `npx tsx scripts/simulate-price-drop.ts`
+
+Gerçek Expo push göndermek için: `npx tsx scripts/simulate-price-drop.ts --send`
 
 ## Proje yapısı
 

@@ -18,7 +18,13 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Heart, ShoppingBag, Sparkles, X } from 'lucide-react-native';
-import { GARMENT_CATEGORY_LABEL, type Product } from '../types/product';
+import {
+  formatTryPrice,
+  GARMENT_CATEGORY_LABEL,
+  getDisplayPrice,
+  hasCatalogPriceDrop,
+  type Product,
+} from '../types/product';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -38,10 +44,13 @@ export interface SwipeCardProps {
   onSwipeLeft: (product: Product) => void;
   onVirtualTryOn: (product: Product) => void;
   onBuy: (product: Product) => void;
+  onRequireAuth?: () => void;
   isInteractive?: boolean;
+  canLike?: boolean;
 }
 
-const formatPrice = (price: number): string => `₺${price.toFixed(2)}`;
+const formatPrice = (product: Product): string =>
+  formatTryPrice(getDisplayPrice(product));
 
 export default function SwipeCard({
   product,
@@ -49,7 +58,9 @@ export default function SwipeCard({
   onSwipeLeft,
   onVirtualTryOn,
   onBuy,
+  onRequireAuth,
   isInteractive = true,
+  canLike = true,
 }: SwipeCardProps) {
   const [hasImageError, setHasImageError] = useState(false);
 
@@ -58,11 +69,19 @@ export default function SwipeCard({
   const hasExited = useSharedValue(false);
 
   const handleSwipeRight = useCallback((): void => {
-    onSwipeRight(product);
+    try {
+      onSwipeRight(product);
+    } catch (error) {
+      console.error('Failed to like product', { error, productId: product.id });
+    }
   }, [onSwipeRight, product]);
 
   const handleSwipeLeft = useCallback((): void => {
-    onSwipeLeft(product);
+    try {
+      onSwipeLeft(product);
+    } catch (error) {
+      console.error('Failed to pass product', { error, productId: product.id });
+    }
   }, [onSwipeLeft, product]);
 
   const handleVirtualTryOn = useCallback((): void => {
@@ -75,6 +94,14 @@ export default function SwipeCard({
       });
     }
   }, [onVirtualTryOn, product]);
+
+  const handleRequireAuth = useCallback((): void => {
+    try {
+      onRequireAuth?.();
+    } catch (error) {
+      console.error('Auth yönlendirmesi başarısız', { error });
+    }
+  }, [onRequireAuth]);
 
   const handleBuy = useCallback((): void => {
     try {
@@ -118,7 +145,11 @@ export default function SwipeCard({
           (finished) => {
             if (finished) {
               runOnJS(handleBuy)();
-              runOnJS(handleSwipeRight)();
+              if (canLike) {
+                runOnJS(handleSwipeRight)();
+              } else {
+                runOnJS(handleSwipeLeft)();
+              }
             }
           },
         );
@@ -126,6 +157,12 @@ export default function SwipeCard({
       }
 
       if (event.translationX > SWIPE_THRESHOLD_PX) {
+        if (!canLike) {
+          translateX.value = withSpring(0, { damping: 18, stiffness: 180 });
+          translateY.value = withSpring(0, { damping: 18, stiffness: 180 });
+          runOnJS(handleRequireAuth)();
+          return;
+        }
         hasExited.value = true;
         translateX.value = withTiming(
           EXIT_DISTANCE_PX,
@@ -206,7 +243,7 @@ export default function SwipeCard({
       <Animated.View
         style={[styles.shadowWrap, animatedCardStyle]}
         accessibilityRole="image"
-        accessibilityLabel={`${product.brand} ${product.title}, ${formatPrice(product.price)}`}
+        accessibilityLabel={`${product.brand} ${product.title}, ${formatPrice(product)}`}
       >
         <View style={styles.card}>
           {hasImageError ? (
@@ -247,6 +284,21 @@ export default function SwipeCard({
             <ShoppingBag color="#0F172A" size={26} />
             <Text style={styles.buyStampText}>SATIN AL</Text>
           </Animated.View>
+
+          {isInteractive && !canLike ? (
+            <Pressable
+              onPress={handleRequireAuth}
+              style={({ pressed }) => [
+                styles.authButton,
+                pressed ? styles.buyButtonPressed : null,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel="Beğenmek için giriş yap"
+            >
+              <Heart color="#0F172A" size={16} />
+              <Text style={styles.authButtonText}>Beğenmek için giriş yap</Text>
+            </Pressable>
+          ) : null}
 
           {isInteractive ? (
             <GestureDetector gesture={buyTapGesture}>
@@ -290,7 +342,15 @@ export default function SwipeCard({
             <Text style={styles.title} numberOfLines={2}>
               {product.title}
             </Text>
-            <Text style={styles.price}>{formatPrice(product.price)}</Text>
+            <View style={styles.priceRow}>
+              {hasCatalogPriceDrop(product) &&
+              typeof product.previousPrice === 'number' ? (
+                <Text style={styles.previousPrice}>
+                  {formatTryPrice(product.previousPrice)}
+                </Text>
+              ) : null}
+              <Text style={styles.price}>{formatPrice(product)}</Text>
+            </View>
           </View>
         </View>
       </Animated.View>
@@ -418,6 +478,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
   },
+  authButton: {
+    position: 'absolute',
+    left: 16,
+    top: 18,
+    zIndex: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(248, 250, 252, 0.96)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+  },
+  authButtonText: {
+    color: '#0F172A',
+    fontSize: 13,
+    fontWeight: '800',
+  },
   info: {
     position: 'absolute',
     left: 0,
@@ -477,6 +555,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     lineHeight: 30,
     marginBottom: 8,
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  previousPrice: {
+    color: '#94A3B8',
+    fontSize: 16,
+    fontWeight: '600',
+    textDecorationLine: 'line-through',
   },
   price: {
     color: '#FFFFFF',

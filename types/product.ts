@@ -7,6 +7,9 @@ export interface Product {
   imageUrl: string;
   title: string;
   price: number;
+  currentPrice?: number;
+  previousPrice?: number;
+  lastPriceCheckedAt?: string;
   brand: string;
   category: GarmentCategory;
   garmentDescription: string;
@@ -16,6 +19,15 @@ export interface Product {
   externalId?: string;
 }
 
+export interface LikedProduct {
+  likeId: string;
+  product: Product;
+  likedPrice: number;
+  targetPrice: number | null;
+  notifyOnPriceDrop: boolean;
+  likedAt: string;
+}
+
 export interface FeedProductRow {
   id: string;
   provider: FeedProvider;
@@ -23,6 +35,9 @@ export interface FeedProductRow {
   title: string;
   brand: string | null;
   price: number | string;
+  current_price?: number | string | null;
+  previous_price?: number | string | null;
+  last_price_checked_at?: string | null;
   currency: string;
   image_url: string;
   product_url: string;
@@ -37,3 +52,27 @@ export const GARMENT_CATEGORY_LABEL: Record<GarmentCategory, string> = {
   dresses: 'Elbise',
 };
 
+export const getDisplayPrice = (product: Product): number =>
+  product.currentPrice ?? product.price;
+
+export const hasCatalogPriceDrop = (product: Product): boolean => {
+  const livePrice = getDisplayPrice(product);
+  return (
+    typeof product.previousPrice === 'number' &&
+    product.previousPrice > livePrice
+  );
+};
+
+export const formatTryPrice = (price: number): string =>
+  `₺${price.toFixed(2)}`;
+
+export const getDropPercent = (
+  likedPrice: number,
+  livePrice: number,
+): number => {
+  if (likedPrice <= 0 || livePrice >= likedPrice) {
+    return 0;
+  }
+  const percent = Math.round(((likedPrice - livePrice) / likedPrice) * 100);
+  return Math.max(1, percent);
+};

@@ -1,3 +1,4 @@
+import { parseOptionalNumeric } from '../lib/price';
 import { MOCK_PRODUCTS } from '../data/mockProducts';
 import { buildAffiliateUrl } from '../lib/deeplink';
 import { getSupabaseClient } from '../lib/supabase';
@@ -87,11 +88,20 @@ const mapFeedRow = (row: FeedProductRow): Product | null => {
   const garmentDescription =
     row.garment_description?.trim() || `${brand} ${row.title}`.trim();
 
+  const listPrice = toPrice(row.price);
+  const currentPrice = parseOptionalNumeric(row.current_price);
+
   return {
     id: row.id,
     imageUrl: row.image_url,
     title: row.title,
-    price: toPrice(row.price),
+    price: listPrice,
+    currentPrice,
+    previousPrice: parseOptionalNumeric(row.previous_price),
+    lastPriceCheckedAt:
+      typeof row.last_price_checked_at === 'string'
+        ? row.last_price_checked_at
+        : undefined,
     brand,
     category: row.category,
     garmentDescription,
@@ -113,21 +123,36 @@ export const fetchFeedProducts = async (
   }
 
   try {
-    const { data, error } = await client
+    const withPriceColumns =
+      'id, provider, external_id, title, brand, price, current_price, previous_price, last_price_checked_at, currency, image_url, product_url, category, affiliate_url';
+    const withoutPriceColumns =
+      'id, provider, external_id, title, brand, price, currency, image_url, product_url, category, affiliate_url';
+
+    const first = await client
       .from('products')
-      .select(
-        'id, provider, external_id, title, brand, price, currency, image_url, product_url, category, affiliate_url',
-      )
+      .select(withPriceColumns)
       .limit(Math.max(limit * FETCH_POOL_MULTIPLIER, limit));
 
-    if (error) {
+    let rows: unknown[] = first.data ?? [];
+    let queryError = first.error;
+
+    if (queryError?.message.toLowerCase().includes('current_price')) {
+      const retry = await client
+        .from('products')
+        .select(withoutPriceColumns)
+        .limit(Math.max(limit * FETCH_POOL_MULTIPLIER, limit));
+      rows = retry.data ?? [];
+      queryError = retry.error;
+    }
+
+    if (queryError) {
       console.error('Supabase urun feedi alinamadi; mock urunlere dusuluyor.', {
-        message: error.message,
+        message: queryError.message,
       });
       return { products: MOCK_PRODUCTS, source: 'mock' };
     }
 
-    const mapped = (data ?? [])
+    const mapped = rows
       .filter(isFeedProductRow)
       .map(mapFeedRow)
       .filter((product): product is Product => product !== null);
