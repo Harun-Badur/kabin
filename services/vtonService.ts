@@ -1,9 +1,13 @@
 import { File } from 'expo-file-system';
 import {
+  cacheDirectory,
+  deleteAsync,
   EncodingType,
   readAsStringAsync,
+  writeAsStringAsync,
 } from 'expo-file-system/legacy';
 import * as ImageManipulator from 'expo-image-manipulator';
+import { logger } from '../lib/logger';
 import { getRequiredSupabaseClient } from '../lib/supabase';
 import type { GarmentCategory, TryOnOptions } from '../types/vton';
 
@@ -11,6 +15,7 @@ const IMAGE_MAX_WIDTH = 768;
 const IMAGE_JPEG_QUALITY = 0.8;
 const FETCH_TIMEOUT_MS = 180_000;
 const BODY_SUMMARY_LIMIT = 240;
+const DATA_URI_PREFIX_PATTERN = /^data:image\/[a-z+]+;base64,/i;
 
 export class VtonServiceError extends Error {
   constructor(message: string) {
@@ -60,7 +65,7 @@ const getAccessToken = async (): Promise<string> => {
   const { data, error } = await client.auth.getSession();
 
   if (error) {
-    console.error('Oturum tokenı okunamadı', { message: error.message });
+    logger.error('Oturum tokenı okunamadı', { detail: error.message });
     throw new VtonServiceError(
       'Oturum doğrulanamadı. Çıkıp tekrar giriş yapmayı dene.',
     );
@@ -91,11 +96,40 @@ const readImageAsBase64 = async (uri: string): Promise<string> => {
     const file = new File(uri);
     return await file.base64();
   } catch (error) {
-    console.error('Failed to read image with File API, using legacy reader', {
+    logger.warn('File API ile okunamadı, legacy okuyucuya düşülüyor', {
       error,
     });
     return readAsStringAsync(uri, { encoding: EncodingType.Base64 });
   }
+};
+
+/**
+ * Modal'dan gelen base64 gövde React state'inde tutulursa her render'da
+ * megabaytlık string kopyalanır. Sonucu cache dizinine yazıp yalnızca
+ * file:// URI'sini döndürüyoruz; bir sonraki denemede eski dosya silinir.
+ */
+let lastResultUri: string | null = null;
+
+const persistResultImage = async (base64: string): Promise<string> => {
+  const directory = cacheDirectory;
+  if (!directory) {
+    throw new VtonServiceError(
+      'Cihazda geçici alan bulunamadı. Uygulamayı yeniden başlatıp tekrar dene.',
+    );
+  }
+
+  if (lastResultUri) {
+    await deleteAsync(lastResultUri, { idempotent: true }).catch(
+      (error: unknown) => {
+        logger.warn('Önceki deneme dosyası silinemedi', { error });
+      },
+    );
+  }
+
+  const uri = `${directory}kabin-tryon-${Date.now()}.jpg`;
+  await writeAsStringAsync(uri, base64, { encoding: EncodingType.Base64 });
+  lastResultUri = uri;
+  return uri;
 };
 
 const extractDetail = (body: string): string => {
@@ -111,7 +145,7 @@ const extractDetail = (body: string): string => {
       }
     }
   } catch (error) {
-    console.error('Failed to parse Modal error body', { error });
+    logger.warn('Hata gövdesi JSON olarak çözümlenemedi', { error });
   }
 
   return summarizeBody(body) || 'yanıt boş';
@@ -119,7 +153,7 @@ const extractDetail = (body: string): string => {
 
 const throwHttpError = (status: number, body: string): never => {
   const detail = extractDetail(body);
-  console.error('VTON isteği başarısız', { status, detail });
+  logger.error('VTON isteği başarısız', { status, detail });
 
   if (status === 401 || status === 403) {
     throw new VtonServiceError(
@@ -246,29 +280,32 @@ export const tryOnGarment = async (
     try {
       parsed = JSON.parse(body) as ModalTryOnResponse;
     } catch (error) {
-      console.error('Failed to parse Modal VTON JSON', {
+      logger.error('Sanal deneme yanıtı JSON değil', {
         error,
-        body: summarizeBody(body),
+        status: response.status,
       });
       throw new VtonServiceError(
         `Sanal deneme yanıtı okunamadı (HTTP ${response.status}): ${summarizeBody(body)}`,
       );
     }
 
-    const imageDataUri = parsed.image_data_uri;
-    if (!imageDataUri) {
+    const resultBase64 =
+      parsed.image_base64 ??
+      parsed.image_data_uri?.replace(DATA_URI_PREFIX_PATTERN, '');
+
+    if (!resultBase64) {
       throw new VtonServiceError(
         `Sanal deneme sonucu görseli yok (HTTP ${response.status}).`,
       );
     }
 
-    return imageDataUri;
+    return persistResultImage(resultBase64);
   } catch (error) {
     if (error instanceof VtonServiceError) {
       throw error;
     }
 
-    console.error('Virtual try-on failed', { error });
+    logger.error('Sanal deneme beklenmeyen hatayla düştü', { error });
     throw new VtonServiceError(
       'Sanal deneme sırasında beklenmeyen bir hata oluştu. İnternetini kontrol edip tekrar dene.',
     );

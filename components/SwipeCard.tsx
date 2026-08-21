@@ -1,23 +1,31 @@
-import { useCallback, useState } from 'react';
-import {
-  Dimensions,
-  Image,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Dimensions, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  cancelAnimation,
+  Easing,
   Extrapolation,
   interpolate,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { Heart, ShoppingBag, Sparkles, X } from 'lucide-react-native';
+import PressableScale from './PressableScale';
+import { logger } from '../lib/logger';
+import {
+  CARD_EXIT_DURATION_MS,
+  CARD_EXIT_LIFT_PX,
+  CARD_MAX_ROTATION_DEG,
+  CARD_SNAP_DURATION_MS,
+  CARD_SNAP_SCALE,
+  PRESS_DURATION_MS,
+  PRESS_SCALE,
+} from '../lib/motion';
 import {
   formatTryPrice,
   GARMENT_CATEGORY_LABEL,
@@ -32,9 +40,8 @@ const SWIPE_THRESHOLD_PX = 100;
 const SWIPE_UP_THRESHOLD_PX = 100;
 const EXIT_DISTANCE_PX = SCREEN_WIDTH * 1.35;
 const EXIT_UP_DISTANCE_PX = SCREEN_HEIGHT * 1.15;
-const EXIT_DURATION_MS = 280;
-const CARD_MAX_ROTATION_DEG = 14;
 const PAN_MIN_DISTANCE_PX = 18;
+const EXIT_TIMING = { duration: CARD_EXIT_DURATION_MS } as const;
 
 export type { Product };
 
@@ -66,13 +73,27 @@ export default function SwipeCard({
 
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
+  const cardScale = useSharedValue(1);
+  const cardOpacity = useSharedValue(1);
+  const buyScale = useSharedValue(1);
   const hasExited = useSharedValue(false);
+
+  useEffect(
+    () => () => {
+      cancelAnimation(translateX);
+      cancelAnimation(translateY);
+      cancelAnimation(cardScale);
+      cancelAnimation(cardOpacity);
+      cancelAnimation(buyScale);
+    },
+    [buyScale, cardOpacity, cardScale, translateX, translateY],
+  );
 
   const handleSwipeRight = useCallback((): void => {
     try {
       onSwipeRight(product);
     } catch (error) {
-      console.error('Failed to like product', { error, productId: product.id });
+      logger.error('Beğeni işlenemedi', { error, productId: product.id });
     }
   }, [onSwipeRight, product]);
 
@@ -80,7 +101,7 @@ export default function SwipeCard({
     try {
       onSwipeLeft(product);
     } catch (error) {
-      console.error('Failed to pass product', { error, productId: product.id });
+      logger.error('Geçme işlenemedi', { error, productId: product.id });
     }
   }, [onSwipeLeft, product]);
 
@@ -88,7 +109,7 @@ export default function SwipeCard({
     try {
       onVirtualTryOn(product);
     } catch (error) {
-      console.error('Failed to start virtual try-on', {
+      logger.error('Sanal deneme başlatılamadı', {
         error,
         productId: product.id,
       });
@@ -99,7 +120,7 @@ export default function SwipeCard({
     try {
       onRequireAuth?.();
     } catch (error) {
-      console.error('Auth yönlendirmesi başarısız', { error });
+      logger.error('Auth yönlendirmesi başarısız', { error });
     }
   }, [onRequireAuth]);
 
@@ -107,19 +128,60 @@ export default function SwipeCard({
     try {
       onBuy(product);
     } catch (error) {
-      console.error('Failed to open marketplace page', {
+      logger.error('Pazaryeri sayfası açılamadı', {
         error,
         productId: product.id,
       });
     }
   }, [onBuy, product]);
 
+  const finishBuyExit = useCallback((): void => {
+    handleBuy();
+    if (canLike) {
+      handleSwipeRight();
+    } else {
+      handleSwipeLeft();
+    }
+  }, [canLike, handleBuy, handleSwipeLeft, handleSwipeRight]);
+
   const buyTapGesture = Gesture.Tap()
     .enabled(isInteractive)
     .maxDistance(12)
+    .onBegin(() => {
+      buyScale.value = withTiming(PRESS_SCALE, { duration: PRESS_DURATION_MS });
+    })
+    .onFinalize(() => {
+      buyScale.value = withTiming(1, { duration: PRESS_DURATION_MS });
+    })
     .onEnd(() => {
       runOnJS(handleBuy)();
     });
+
+  const snapHome = (): void => {
+    'worklet';
+    translateX.value = withSpring(0, { damping: 18, stiffness: 180 });
+    translateY.value = withSpring(0, { damping: 18, stiffness: 180 });
+    cardScale.value = withSequence(
+      withTiming(CARD_SNAP_SCALE, { duration: 0 }),
+      withTiming(1, {
+        duration: CARD_SNAP_DURATION_MS,
+        easing: Easing.out(Easing.back(1.8)),
+      }),
+    );
+  };
+
+  const flyOut = (toX: number, toY: number, onDone: () => void): void => {
+    'worklet';
+    hasExited.value = true;
+    cardOpacity.value = withTiming(0, EXIT_TIMING);
+    cardScale.value = withTiming(0.92, EXIT_TIMING);
+    translateY.value = withTiming(toY, EXIT_TIMING);
+    translateX.value = withTiming(toX, EXIT_TIMING, (finished) => {
+      if (finished) {
+        runOnJS(onDone)();
+      }
+    });
+  };
 
   const panGesture = Gesture.Pan()
     .enabled(isInteractive)
@@ -138,60 +200,34 @@ export default function SwipeCard({
       }
 
       if (event.translationY < -SWIPE_UP_THRESHOLD_PX) {
-        hasExited.value = true;
-        translateY.value = withTiming(
-          -EXIT_UP_DISTANCE_PX,
-          { duration: EXIT_DURATION_MS },
-          (finished) => {
-            if (finished) {
-              runOnJS(handleBuy)();
-              if (canLike) {
-                runOnJS(handleSwipeRight)();
-              } else {
-                runOnJS(handleSwipeLeft)();
-              }
-            }
-          },
-        );
+        flyOut(event.translationX, -EXIT_UP_DISTANCE_PX, finishBuyExit);
         return;
       }
 
       if (event.translationX > SWIPE_THRESHOLD_PX) {
         if (!canLike) {
-          translateX.value = withSpring(0, { damping: 18, stiffness: 180 });
-          translateY.value = withSpring(0, { damping: 18, stiffness: 180 });
+          snapHome();
           runOnJS(handleRequireAuth)();
           return;
         }
-        hasExited.value = true;
-        translateX.value = withTiming(
+        flyOut(
           EXIT_DISTANCE_PX,
-          { duration: EXIT_DURATION_MS },
-          (finished) => {
-            if (finished) {
-              runOnJS(handleSwipeRight)();
-            }
-          },
+          event.translationY - CARD_EXIT_LIFT_PX,
+          handleSwipeRight,
         );
         return;
       }
 
       if (event.translationX < -SWIPE_THRESHOLD_PX) {
-        hasExited.value = true;
-        translateX.value = withTiming(
+        flyOut(
           -EXIT_DISTANCE_PX,
-          { duration: EXIT_DURATION_MS },
-          (finished) => {
-            if (finished) {
-              runOnJS(handleSwipeLeft)();
-            }
-          },
+          event.translationY - CARD_EXIT_LIFT_PX,
+          handleSwipeLeft,
         );
         return;
       }
 
-      translateX.value = withSpring(0, { damping: 18, stiffness: 180 });
-      translateY.value = withSpring(0, { damping: 18, stiffness: 180 });
+      snapHome();
     });
 
   const animatedCardStyle = useAnimatedStyle(() => {
@@ -203,10 +239,12 @@ export default function SwipeCard({
     );
 
     return {
+      opacity: cardOpacity.value,
       transform: [
         { translateX: translateX.value },
         { translateY: translateY.value },
-        { rotate: `${rotate}deg` },
+        { rotateZ: `${rotate}deg` },
+        { scale: cardScale.value },
       ],
     };
   });
@@ -218,9 +256,47 @@ export default function SwipeCard({
       [0, 1],
       Extrapolation.CLAMP,
     ),
+    transform: [
+      {
+        scale: interpolate(
+          translateX.value,
+          [0, SWIPE_THRESHOLD_PX],
+          [0.86, 1],
+          Extrapolation.CLAMP,
+        ),
+      },
+    ],
   }));
 
   const nopeOverlayStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      translateX.value,
+      [0, -SWIPE_THRESHOLD_PX],
+      [0, 1],
+      Extrapolation.CLAMP,
+    ),
+    transform: [
+      {
+        scale: interpolate(
+          translateX.value,
+          [0, -SWIPE_THRESHOLD_PX],
+          [0.86, 1],
+          Extrapolation.CLAMP,
+        ),
+      },
+    ],
+  }));
+
+  const likeWashStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      translateX.value,
+      [0, SWIPE_THRESHOLD_PX],
+      [0, 1],
+      Extrapolation.CLAMP,
+    ),
+  }));
+
+  const nopeWashStyle = useAnimatedStyle(() => ({
     opacity: interpolate(
       translateX.value,
       [0, -SWIPE_THRESHOLD_PX],
@@ -236,6 +312,10 @@ export default function SwipeCard({
       [0, 1],
       Extrapolation.CLAMP,
     ),
+  }));
+
+  const buyButtonStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: buyScale.value }],
   }));
 
   return (
@@ -254,12 +334,24 @@ export default function SwipeCard({
             <Image
               source={{ uri: product.imageUrl }}
               style={styles.image}
-              resizeMode="cover"
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              recyclingKey={product.id}
+              transition={160}
               onError={() => setHasImageError(true)}
             />
           )}
 
           <View style={styles.gradientScrim} />
+
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.wash, styles.likeWash, likeWashStyle]}
+          />
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.wash, styles.nopeWash, nopeWashStyle]}
+          />
 
           <Animated.View
             pointerEvents="none"
@@ -286,50 +378,41 @@ export default function SwipeCard({
           </Animated.View>
 
           {isInteractive && !canLike ? (
-            <Pressable
+            <PressableScale
               onPress={handleRequireAuth}
-              style={({ pressed }) => [
-                styles.authButton,
-                pressed ? styles.buyButtonPressed : null,
-              ]}
+              style={styles.authButton}
               accessibilityRole="button"
               accessibilityLabel="Beğenmek için giriş yap"
             >
               <Heart color="#0F172A" size={16} />
               <Text style={styles.authButtonText}>Beğenmek için giriş yap</Text>
-            </Pressable>
+            </PressableScale>
           ) : null}
 
           {isInteractive ? (
             <GestureDetector gesture={buyTapGesture}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.buyButton,
-                  pressed ? styles.buyButtonPressed : null,
-                ]}
+              <Animated.View
+                style={[styles.buyButton, buyButtonStyle]}
                 accessibilityRole="button"
                 accessibilityLabel="Satın al"
               >
                 <ShoppingBag color="#0F172A" size={18} />
                 <Text style={styles.buyButtonText}>Satın Al</Text>
-              </Pressable>
+              </Animated.View>
             </GestureDetector>
           ) : null}
 
           <View style={styles.info}>
             {isInteractive ? (
-              <Pressable
+              <PressableScale
                 onPress={handleVirtualTryOn}
-                style={({ pressed }) => [
-                  styles.tryOnButton,
-                  pressed ? styles.tryOnButtonPressed : null,
-                ]}
+                style={styles.tryOnButton}
                 accessibilityRole="button"
                 accessibilityLabel="Sanal dene"
               >
                 <Sparkles color="#0F172A" size={16} />
                 <Text style={styles.tryOnButtonText}>✨ Sanal Dene</Text>
-              </Pressable>
+              </PressableScale>
             ) : null}
             <View style={styles.categoryBadge}>
               <Text style={styles.categoryBadgeText}>
@@ -405,6 +488,15 @@ const styles = StyleSheet.create({
     height: '38%',
     backgroundColor: 'rgba(15, 23, 42, 0.55)',
   },
+  wash: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  likeWash: {
+    backgroundColor: 'rgba(22, 163, 74, 0.28)',
+  },
+  nopeWash: {
+    backgroundColor: 'rgba(220, 38, 38, 0.28)',
+  },
   stamp: {
     position: 'absolute',
     top: 28,
@@ -470,9 +562,6 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 6,
   },
-  buyButtonPressed: {
-    opacity: 0.82,
-  },
   buyButtonText: {
     color: '#0F172A',
     fontSize: 14,
@@ -515,9 +604,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 999,
     marginBottom: 14,
-  },
-  tryOnButtonPressed: {
-    opacity: 0.82,
   },
   tryOnButtonText: {
     color: '#0F172A',

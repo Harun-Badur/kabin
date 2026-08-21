@@ -72,6 +72,19 @@ yollarda bu başlığı arar; eksik veya hatalıysa 401 döner.
 3. `supabase/price_tracking.sql`
 4. `supabase/rate_limits.sql`
 
+EAS bulut derlemesi `.env` dosyasını görmez; `EXPO_PUBLIC_*` değerleri
+`eas.json` profillerinin `env` bloğunda olmalı (anon key istemciye zaten
+gömülür). `SUPABASE_SERVICE_ROLE_KEY` ve `KABIN_VTON_SECRET` buraya **asla**
+yazılmaz.
+
+### Auth (e-posta)
+
+Supabase Dashboard → **Authentication → Providers → Email**:
+**Confirm email** kapalı olmalı. Açık kalırsa kayıt session dönmez, giriş
+`email not confirmed` ile düşer ve APK'da "İşlem tamamlanamadı" gibi genel
+bir mesaj görünebilir. Geliştirme / dahili test için e-posta doğrulamasını
+kapat; yayında açacaksan kullanıcıya doğrulama bağlantısını açıkça söyle.
+
 ### Edge Function deploy
 
 ```bash
@@ -178,20 +191,32 @@ beyaz silüet + saydam).
 
 ## Proje yapısı
 
+Navigasyon `expo-router` ile dosya tabanlıdır; giriş noktası `index.ts`
+polyfill'leri yükleyip `expo-router/entry`'ye devreder.
+
 ```
 kabin/
-├── App.tsx                 # Swipe feed
+├── index.ts                # polyfill'ler + expo-router/entry
 ├── app.json                # Expo adı: Kabin
+├── app/                    # router: dosya = route
+│   ├── _layout.tsx         # kök Stack + auth gate (Stack.Protected)
+│   ├── auth.tsx            # oturum yoksa buraya düşer
+│   └── (tabs)/
+│       ├── _layout.tsx     # Keşfet / Beğenilenler / Profil
+│       ├── index.tsx       # Keşfet (swipe feed)
+│       ├── liked.tsx       # Beğenilenler
+│       └── profile.tsx     # Profil + hesap silme
 ├── components/
 │   ├── SwipeCard.tsx
 │   └── VirtualTryOnModal.tsx
 ├── data/                   # mock katalog + sample CSV
-├── lib/                    # Supabase client, deep link
+├── hooks/                  # useAuth + AuthProvider
+├── lib/                    # Supabase client, deep link, rıza, gizlilik
 ├── modal/                  # CatVTON FastAPI (Modal)
 ├── scripts/                # import, seed, görsel çıkarma
-├── services/               # feed, VTON, satın al
+├── services/               # feed, VTON, hesap, satın al
 ├── store/                  # Zustand
-├── supabase/               # SQL şema
+├── supabase/               # SQL şema + Edge Functions
 └── types/
 ```
 

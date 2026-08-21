@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { MOCK_PRODUCTS } from '../data/mockProducts';
+import { logger } from '../lib/logger';
 import {
   fetchFeedProducts,
   type FeedSource,
@@ -13,15 +14,15 @@ import {
   updateLikedProductAlert,
 } from '../services/likeService';
 import type { LikedProduct, Product } from '../types/product';
-import { getDisplayPrice } from '../types/product';
 
 export type FeedStatus = 'idle' | 'loading' | 'error' | 'success';
 export type SessionSyncStatus = 'idle' | 'loading' | 'error' | 'success';
 
 export interface LikeAlertPatch {
-  notifyOnPriceDrop?: boolean;
-  targetPrice?: number | null;
+  notifyOnPriceDrop: boolean;
 }
+
+const FEED_LIMIT = 20;
 
 interface AppState {
   currentProducts: Product[];
@@ -29,9 +30,10 @@ interface AppState {
   passedProductIds: string[];
   feedStatus: FeedStatus;
   feedSource: FeedSource | null;
+  feedIsPersonalized: boolean;
   sessionUserId: string | null;
   sessionSyncStatus: SessionSyncStatus;
-  loadFeed: () => Promise<void>;
+  loadFeed: (userId: string | null) => Promise<void>;
   hydrateSession: (userId: string) => Promise<void>;
   resetSession: () => void;
   swipeRight: (product: Product) => void;
@@ -50,24 +52,44 @@ const removeLiked = (
 ): LikedProduct[] =>
   products.filter((item) => item.product.id !== productId);
 
-const appendLikedUnique = (
+/**
+ * Sunucu yazımı başarısız olan ürünü desteye geri koyar. Araya giren diğer
+ * swipe'lar korunsun diye dizinin tamamı snapshot'a döndürülmez.
+ */
+const restoreProduct = (products: Product[], product: Product): Product[] =>
+  products.some((item) => item.id === product.id)
+    ? products
+    : [product, ...products];
+
+const prependLikedUnique = (
   products: LikedProduct[],
   product: Product,
 ): LikedProduct[] => {
   if (products.some((item) => item.product.id === product.id)) {
     return products;
   }
+  // Liste sunucuda liked_at'e göre azalan sıralı geldiği için en yeni beğeni başa.
   return [
-    ...products,
     {
-      likeId: `local-${product.id}`,
       product,
-      likedPrice: getDisplayPrice(product),
-      targetPrice: null,
       notifyOnPriceDrop: true,
       likedAt: new Date().toISOString(),
     },
+    ...products,
   ];
+};
+
+const insertLikedAt = (
+  products: LikedProduct[],
+  index: number,
+  item: LikedProduct,
+): LikedProduct[] => {
+  if (products.some((existing) => existing.product.id === item.product.id)) {
+    return products;
+  }
+  const next = [...products];
+  next.splice(Math.min(Math.max(index, 0), next.length), 0, item);
+  return next;
 };
 
 const appendUniqueId = (ids: string[], productId: string): string[] => {
@@ -95,35 +117,41 @@ export const useAppStore = create<AppState>((set, get) => ({
   passedProductIds: [],
   feedStatus: 'idle',
   feedSource: null,
+  feedIsPersonalized: false,
   sessionUserId: null,
   sessionSyncStatus: 'idle',
-  loadFeed: async (): Promise<void> => {
+  // userId çağıran ekrandan geçer: feed effect'i kök layout'un hidrasyonundan
+  // önce koştuğu için sessionUserId burada henüz null olabiliyor.
+  loadFeed: async (userId: string | null): Promise<void> => {
     set({ feedStatus: 'loading' });
     try {
-      const result = await fetchFeedProducts(20);
-      console.log(`Feed kaynağı: ${result.source}`);
-      const { likedProducts, passedProductIds } = get();
-      set({
+      const result = await fetchFeedProducts(FEED_LIMIT, userId);
+      logger.debug('Feed yüklendi', {
+        source: result.source,
+        isPersonalized: result.isPersonalized,
+      });
+      set((state) => ({
         currentProducts: excludeSeen(
           result.products,
-          likedProducts,
-          passedProductIds,
+          state.likedProducts,
+          state.passedProductIds,
         ),
         feedStatus: 'success',
         feedSource: result.source,
-      });
+        feedIsPersonalized: result.isPersonalized,
+      }));
     } catch (error) {
-      console.error('Feed yüklenemedi; mock ürünlere düşülüyor.', { error });
-      const { likedProducts, passedProductIds } = get();
-      set({
+      logger.error('Feed yüklenemedi; mock ürünlere düşülüyor.', { error });
+      set((state) => ({
         currentProducts: excludeSeen(
           MOCK_PRODUCTS,
-          likedProducts,
-          passedProductIds,
+          state.likedProducts,
+          state.passedProductIds,
         ),
         feedStatus: 'error',
         feedSource: 'mock',
-      });
+        feedIsPersonalized: false,
+      }));
     }
   },
   hydrateSession: async (userId: string): Promise<void> => {
@@ -144,7 +172,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
       }));
     } catch (error) {
-      console.error('Oturum verisi yüklenemedi', { error });
+      logger.error('Oturum verisi yüklenemedi', { error });
       set({ sessionSyncStatus: 'error' });
     }
   },
@@ -154,77 +182,89 @@ export const useAppStore = create<AppState>((set, get) => ({
       sessionSyncStatus: 'idle',
       likedProducts: [],
       passedProductIds: [],
+      feedIsPersonalized: false,
     });
   },
   swipeRight: (product: Product): void => {
-    const previous = get();
-    set({
-      currentProducts: removeProduct(previous.currentProducts, product.id),
-      likedProducts: appendLikedUnique(previous.likedProducts, product),
-      passedProductIds: previous.passedProductIds.filter(
+    const userId = get().sessionUserId;
+
+    set((state) => ({
+      currentProducts: removeProduct(state.currentProducts, product.id),
+      likedProducts: prependLikedUnique(state.likedProducts, product),
+      passedProductIds: state.passedProductIds.filter(
         (id) => id !== product.id,
       ),
-    });
+    }));
 
-    const userId = previous.sessionUserId;
     if (!userId) {
-      console.warn('Beğeni için giriş yok; kayıt yazılmadı.', {
+      logger.warn('Beğeni için oturum yok; kayıt yazılmadı.', {
         productId: product.id,
       });
       return;
     }
 
     void insertLikedProduct(userId, product).catch((error: unknown) => {
-      console.error('Beğeni yazılamadı, geri alınıyor', {
+      logger.error('Beğeni yazılamadı, geri alınıyor', {
         error,
         productId: product.id,
       });
-      set({
-        currentProducts: previous.currentProducts,
-        likedProducts: previous.likedProducts,
-        passedProductIds: previous.passedProductIds,
-      });
+      set((state) => ({
+        currentProducts: restoreProduct(state.currentProducts, product),
+        likedProducts: removeLiked(state.likedProducts, product.id),
+      }));
     });
   },
   swipeLeft: (product: Product): void => {
-    const previous = get();
-    set({
-      currentProducts: removeProduct(previous.currentProducts, product.id),
-      passedProductIds: appendUniqueId(previous.passedProductIds, product.id),
-    });
+    const userId = get().sessionUserId;
 
-    const userId = previous.sessionUserId;
+    set((state) => ({
+      currentProducts: removeProduct(state.currentProducts, product.id),
+      passedProductIds: appendUniqueId(state.passedProductIds, product.id),
+    }));
+
     if (!userId) {
       return;
     }
 
     void insertPassedProduct(userId, product).catch((error: unknown) => {
-      console.error('Geçme yazılamadı, geri alınıyor', {
+      logger.error('Geçme yazılamadı, geri alınıyor', {
         error,
         productId: product.id,
       });
-      set({
-        currentProducts: previous.currentProducts,
-        passedProductIds: previous.passedProductIds,
-      });
+      set((state) => ({
+        currentProducts: restoreProduct(state.currentProducts, product),
+        passedProductIds: state.passedProductIds.filter(
+          (id) => id !== product.id,
+        ),
+      }));
     });
   },
   unlikeProduct: async (productId: string): Promise<void> => {
-    const previous = get();
-    const userId = previous.sessionUserId;
-    set({
-      likedProducts: removeLiked(previous.likedProducts, productId),
-    });
+    const { likedProducts, sessionUserId: userId } = get();
+    const removedIndex = likedProducts.findIndex(
+      (item) => item.product.id === productId,
+    );
+    const removed = likedProducts[removedIndex];
 
-    if (!userId) {
+    set((state) => ({
+      likedProducts: removeLiked(state.likedProducts, productId),
+    }));
+
+    if (!userId || !removed) {
       return;
     }
 
     try {
       await deleteLikedProduct(userId, productId);
     } catch (error) {
-      console.error('Beğeni silinemedi, geri alınıyor', { error, productId });
-      set({ likedProducts: previous.likedProducts });
+      logger.error('Beğeni silinemedi, geri alınıyor', { error, productId });
+      set((state) => ({
+        likedProducts: insertLikedAt(
+          state.likedProducts,
+          removedIndex,
+          removed,
+        ),
+      }));
       throw error;
     }
   },
@@ -232,24 +272,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     productId: string,
     patch: LikeAlertPatch,
   ): Promise<void> => {
-    const previous = get();
-    const userId = previous.sessionUserId;
-    set({
-      likedProducts: previous.likedProducts.map((item) => {
-        if (item.product.id !== productId) {
-          return item;
-        }
-        return {
-          ...item,
-          notifyOnPriceDrop:
-            patch.notifyOnPriceDrop ?? item.notifyOnPriceDrop,
-          targetPrice:
-            patch.targetPrice === undefined
-              ? item.targetPrice
-              : patch.targetPrice,
-        };
-      }),
+    const { likedProducts, sessionUserId: userId } = get();
+    const target = likedProducts.find((item) => item.product.id === productId);
+
+    if (!target) {
+      return;
+    }
+
+    const previousValue = target.notifyOnPriceDrop;
+    const applyNotify = (value: boolean) => (state: AppState) => ({
+      likedProducts: state.likedProducts.map((item) =>
+        item.product.id === productId
+          ? { ...item, notifyOnPriceDrop: value }
+          : item,
+      ),
     });
+
+    set(applyNotify(patch.notifyOnPriceDrop));
 
     if (!userId) {
       return;
@@ -260,11 +299,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         userId,
         productId,
         notifyOnPriceDrop: patch.notifyOnPriceDrop,
-        targetPrice: patch.targetPrice,
       });
     } catch (error) {
-      console.error('Fiyat alarmı geri alındı', { error, productId });
-      set({ likedProducts: previous.likedProducts });
+      logger.error('Fiyat alarmı geri alındı', { error, productId });
+      set(applyNotify(previousValue));
       throw error;
     }
   },
@@ -277,7 +315,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const likedProducts = await fetchLikedProducts(userId);
       set({ likedProducts, sessionSyncStatus: 'success' });
     } catch (error) {
-      console.error('Beğeniler yenilenemedi', { error });
+      logger.error('Beğeniler yenilenemedi', { error });
       throw error;
     }
   },

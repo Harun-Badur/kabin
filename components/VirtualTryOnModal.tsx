@@ -1,27 +1,39 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
+  BackHandler,
+  Dimensions,
   Linking,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import Animated, {
+  cancelAnimation,
   Easing,
+  interpolate,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
 import { ImageIcon, RotateCcw, Sparkles, X } from 'lucide-react-native';
+import PressableScale from './PressableScale';
 import { grantVtonConsent, hasVtonConsent } from '../lib/consent';
+import { logger } from '../lib/logger';
+import {
+  CONSENT_ENTER_DURATION_MS,
+  HERO_GROW_DURATION_MS,
+  MODAL_BACKDROP_MAX_OPACITY,
+  MODAL_SLIDE_DURATION_MS,
+} from '../lib/motion';
 import { PRIVACY_URL } from '../lib/privacy';
 import {
   tryOnGarment,
@@ -31,6 +43,8 @@ import type { Product } from '../types/product';
 import type { TryOnStatus } from '../types/vton';
 
 const IMAGE_MAX_WIDTH = 768;
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const SHEET_CLOSE_DURATION_MS = 220;
 
 type ConsentStatus = 'checking' | 'required' | 'granted';
 
@@ -52,8 +66,18 @@ export default function VirtualTryOnModal({
   const [personImageUri, setPersonImageUri] = useState<string | null>(null);
   const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
   const [consentStatus, setConsentStatus] = useState<ConsentStatus>('checking');
+  const [isRendered, setIsRendered] = useState(visible);
+
+  const lastProductRef = useRef(product);
+  if (product) {
+    lastProductRef.current = product;
+  }
+  const displayProduct = product ?? lastProductRef.current;
 
   const pulse = useSharedValue(0.55);
+  const sheetProgress = useSharedValue(0);
+  const consentProgress = useSharedValue(0);
+  const heroProgress = useSharedValue(0);
 
   useEffect(() => {
     if (!visible) {
@@ -85,9 +109,51 @@ export default function VirtualTryOnModal({
     pulse.value = withTiming(0.55, { duration: 200 });
   }, [pulse, status]);
 
+  // withRepeat sonsuz döngüde; unmount'ta iptal edilmezse worklet çalışmaya
+  // devam eder ve shared value sızar.
+  useEffect(
+    () => () => {
+      cancelAnimation(pulse);
+      cancelAnimation(sheetProgress);
+      cancelAnimation(consentProgress);
+      cancelAnimation(heroProgress);
+    },
+    [consentProgress, heroProgress, pulse, sheetProgress],
+  );
+
   const pulseStyle = useAnimatedStyle(() => ({
     opacity: pulse.value,
     transform: [{ scale: 0.92 + pulse.value * 0.12 }],
+  }));
+
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: sheetProgress.value * MODAL_BACKDROP_MAX_OPACITY,
+  }));
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateY: interpolate(
+          sheetProgress.value,
+          [0, 1],
+          [SCREEN_HEIGHT, 0],
+        ),
+      },
+    ],
+  }));
+
+  const consentEnterStyle = useAnimatedStyle(() => ({
+    opacity: consentProgress.value,
+    transform: [
+      { scale: interpolate(consentProgress.value, [0, 1], [0.9, 1]) },
+    ],
+  }));
+
+  const heroStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(heroProgress.value, [0, 1], [0.35, 1]),
+    transform: [
+      { scale: interpolate(heroProgress.value, [0, 1], [0.78, 1]) },
+    ],
   }));
 
   const resetState = useCallback((): void => {
@@ -97,10 +163,83 @@ export default function VirtualTryOnModal({
     setResultImageUrl(null);
   }, []);
 
-  const handleClose = useCallback((): void => {
+  const finishExit = useCallback((): void => {
     resetState();
+    setIsRendered(false);
+  }, [resetState]);
+
+  const handleClose = useCallback((): void => {
     onClose();
-  }, [onClose, resetState]);
+  }, [onClose]);
+
+  useEffect(() => {
+    if (visible) {
+      setIsRendered(true);
+      sheetProgress.value = withTiming(1, {
+        duration: MODAL_SLIDE_DURATION_MS,
+        easing: Easing.out(Easing.cubic),
+      });
+      return;
+    }
+
+    sheetProgress.value = withTiming(
+      0,
+      {
+        duration: SHEET_CLOSE_DURATION_MS,
+        easing: Easing.in(Easing.cubic),
+      },
+      (finished) => {
+        if (finished) {
+          runOnJS(finishExit)();
+        }
+      },
+    );
+  }, [finishExit, sheetProgress, visible]);
+
+  useEffect(() => {
+    if (!visible) {
+      consentProgress.value = 0;
+      heroProgress.value = 0;
+      return;
+    }
+
+    if (consentStatus === 'required') {
+      consentProgress.value = 0;
+      consentProgress.value = withTiming(1, {
+        duration: CONSENT_ENTER_DURATION_MS,
+        easing: Easing.out(Easing.cubic),
+      });
+    }
+
+    if (consentStatus === 'granted') {
+      heroProgress.value = 0;
+      heroProgress.value = withTiming(1, {
+        duration: HERO_GROW_DURATION_MS,
+        easing: Easing.out(Easing.cubic),
+      });
+    }
+  }, [consentProgress, consentStatus, heroProgress, visible]);
+
+  // Sekme katmanı, kök sekmedeyken geri tuşuyla uygulamadan çıkışı engelliyor.
+  // Modal görünürken geri tuşunun sahibi burasıdır; aksi halde o engel modalın
+  // kapanmasını da yutar.
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      () => {
+        handleClose();
+        return true;
+      },
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, [handleClose, visible]);
 
   const handlePickPhoto = useCallback(async (): Promise<void> => {
     try {
@@ -142,7 +281,7 @@ export default function VirtualTryOnModal({
       setErrorMessage(resetMessage);
       setStatus('idle');
     } catch (error) {
-      console.error('Failed to pick photo', { error });
+      logger.error('Fotoğraf seçilemedi', { error });
       setStatus('error');
       setErrorMessage('Fotoğraf seçilemedi. Lütfen tekrar dene.');
     }
@@ -170,7 +309,7 @@ export default function VirtualTryOnModal({
         error instanceof VtonServiceError
           ? error.message
           : 'Sanal deneme tamamlanamadı. Lütfen tekrar dene.';
-      console.error('Virtual try-on request failed', { error });
+      logger.error('Sanal deneme isteği başarısız', { error });
       setStatus('error');
       setErrorMessage(message);
       Alert.alert('Sanal deneme hatası', message);
@@ -190,7 +329,7 @@ export default function VirtualTryOnModal({
 
   const handleOpenPrivacy = useCallback((): void => {
     void Linking.openURL(PRIVACY_URL).catch((error: unknown) => {
-      console.error('Gizlilik politikası açılamadı', { error });
+      logger.error('Gizlilik politikası açılamadı', { error });
       Alert.alert(
         'Bağlantı açılamadı',
         'Gizlilik politikası bu cihazda açılamadı.',
@@ -198,25 +337,33 @@ export default function VirtualTryOnModal({
     });
   }, []);
 
-  if (!product) {
+  if (!displayProduct || !isRendered) {
     return null;
   }
 
-  if (consentStatus !== 'granted') {
-    return (
-      <Modal
-        visible={visible}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        onRequestClose={handleClose}
-      >
-        <View style={styles.screen}>
-          {consentStatus === 'checking' ? (
-            <View style={styles.centerBlock}>
-              <ActivityIndicator color="#F8FAFC" size="large" />
-            </View>
-          ) : (
-            <>
+  const isConsentFlow = consentStatus !== 'granted';
+
+  return (
+    <Modal
+      visible={isRendered}
+      transparent
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={handleClose}
+    >
+      <View style={styles.modalRoot}>
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.backdrop, backdropStyle]}
+        />
+        <Animated.View style={[styles.screen, sheetStyle]}>
+          {isConsentFlow ? (
+            consentStatus === 'checking' ? (
+              <View style={styles.centerBlock}>
+                <ActivityIndicator color="#F8FAFC" size="large" />
+              </View>
+            ) : (
+              <Animated.View style={[styles.consentFill, consentEnterStyle]}>
               <ScrollView contentContainerStyle={styles.consentBody}>
                 <Text style={styles.kicker}>Sanal deneme</Text>
                 <Text style={styles.consentTitle}>
@@ -242,74 +389,67 @@ export default function VirtualTryOnModal({
                   • Bu izni istediğin zaman uygulamayı kaldırarak ya da
                   hesabını silerek geri alabilirsin.
                 </Text>
-                <Pressable
+                <PressableScale
                   onPress={handleOpenPrivacy}
                   accessibilityRole="link"
                   accessibilityLabel="Gizlilik Politikası"
                 >
                   <Text style={styles.consentLink}>Gizlilik Politikası</Text>
-                </Pressable>
+                </PressableScale>
               </ScrollView>
 
               <View style={styles.footer}>
                 <View style={styles.footerRow}>
-                  <Pressable
+                  <PressableScale
                     onPress={handleClose}
                     style={styles.secondaryButton}
                     accessibilityRole="button"
                     accessibilityLabel="Vazgeç"
                   >
                     <Text style={styles.secondaryButtonText}>Vazgeç</Text>
-                  </Pressable>
-                  <Pressable
+                  </PressableScale>
+                  <PressableScale
                     onPress={handleAcceptConsent}
                     style={styles.primaryButton}
                     accessibilityRole="button"
                     accessibilityLabel="Kabul Et"
                   >
                     <Text style={styles.primaryButtonText}>Kabul Et</Text>
-                  </Pressable>
+                  </PressableScale>
                 </View>
               </View>
-            </>
-          )}
-        </View>
-      </Modal>
-    );
-  }
-
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="fullScreen"
-      onRequestClose={handleClose}
-    >
-      <View style={styles.screen}>
+              </Animated.View>
+            )
+          ) : (
+            <>
         <View style={styles.header}>
           <View style={styles.headerCopy}>
             <Text style={styles.kicker}>Sanal deneme</Text>
           </View>
-          <Pressable
+          <PressableScale
             onPress={handleClose}
             style={styles.closeButton}
             accessibilityRole="button"
             accessibilityLabel="Kapat"
           >
             <X color="#F8FAFC" size={22} />
-          </Pressable>
+          </PressableScale>
         </View>
 
-        <View style={styles.garmentRow}>
+        <Animated.View style={[styles.heroCard, heroStyle]}>
           <Image
-            source={{ uri: product.imageUrl }}
-            style={styles.garmentThumb}
-            resizeMode="cover"
+            source={{ uri: displayProduct.imageUrl }}
+            style={styles.heroImage}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            recyclingKey={displayProduct.id}
           />
+        </Animated.View>
+        <View style={styles.garmentRow}>
           <View style={styles.garmentCopy}>
             <Text style={styles.garmentKicker}>Giydirilecek ürün</Text>
             <Text style={styles.garmentTitle} numberOfLines={1}>
-              {product.title}
+              {displayProduct.title}
             </Text>
           </View>
         </View>
@@ -324,7 +464,7 @@ export default function VirtualTryOnModal({
               <Text style={styles.loadingText}>
                 AI seni giydiriyor... (ilk deneme 1-2 dk sürebilir)
               </Text>
-              <Text style={styles.hint}>{product.brand}</Text>
+              <Text style={styles.hint}>{displayProduct.brand}</Text>
             </View>
           ) : null}
 
@@ -333,7 +473,9 @@ export default function VirtualTryOnModal({
               <Image
                 source={{ uri: resultImageUrl }}
                 style={styles.resultImage}
-                resizeMode="contain"
+                contentFit="contain"
+                cachePolicy="none"
+                recyclingKey={resultImageUrl}
               />
             </View>
           ) : null}
@@ -351,7 +493,9 @@ export default function VirtualTryOnModal({
                 <Image
                   source={{ uri: personImageUri }}
                   style={styles.previewImage}
-                  resizeMode="cover"
+                  contentFit="cover"
+                  cachePolicy="none"
+                  recyclingKey={personImageUri}
                 />
               ) : (
                 <View style={styles.placeholder}>
@@ -368,58 +512,74 @@ export default function VirtualTryOnModal({
 
         <View style={styles.footer}>
           {status === 'idle' && !personImageUri ? (
-            <Pressable onPress={handlePickPhoto} style={styles.primaryButton}>
+            <PressableScale onPress={handlePickPhoto} style={styles.primaryButton}>
               <Text style={styles.primaryButtonText}>Fotoğraf Seç</Text>
-            </Pressable>
+            </PressableScale>
           ) : null}
 
           {status === 'idle' && personImageUri ? (
             <View style={styles.footerRow}>
-              <Pressable onPress={handlePickPhoto} style={styles.secondaryButton}>
+              <PressableScale onPress={handlePickPhoto} style={styles.secondaryButton}>
                 <Text style={styles.secondaryButtonText}>Değiştir</Text>
-              </Pressable>
-              <Pressable onPress={handleTryOn} style={styles.primaryButton}>
+              </PressableScale>
+              <PressableScale onPress={handleTryOn} style={styles.primaryButton}>
                 <Text style={styles.primaryButtonText}>🚀 Üzerimde Dene</Text>
-              </Pressable>
+              </PressableScale>
             </View>
           ) : null}
 
           {status === 'success' ? (
             <View style={styles.footerRow}>
-              <Pressable onPress={handleRetry} style={styles.secondaryButton}>
+              <PressableScale onPress={handleRetry} style={styles.secondaryButton}>
                 <RotateCcw color="#F8FAFC" size={16} />
                 <Text style={styles.secondaryButtonText}>Tekrar Dene</Text>
-              </Pressable>
-              <Pressable onPress={handleClose} style={styles.primaryButton}>
+              </PressableScale>
+              <PressableScale onPress={handleClose} style={styles.primaryButton}>
                 <Text style={styles.primaryButtonText}>Kapat</Text>
-              </Pressable>
+              </PressableScale>
             </View>
           ) : null}
 
           {status === 'error' ? (
             <View style={styles.footerRow}>
-              <Pressable onPress={handleClose} style={styles.secondaryButton}>
+              <PressableScale onPress={handleClose} style={styles.secondaryButton}>
                 <Text style={styles.secondaryButtonText}>Kapat</Text>
-              </Pressable>
-              <Pressable onPress={personImageUri ? handleTryOn : handlePickPhoto} style={styles.primaryButton}>
+              </PressableScale>
+              <PressableScale
+                onPress={personImageUri ? handleTryOn : handlePickPhoto}
+                style={styles.primaryButton}
+              >
                 <Text style={styles.primaryButtonText}>
                   {personImageUri ? 'Tekrar Dene' : 'Fotoğraf Seç'}
                 </Text>
-              </Pressable>
+              </PressableScale>
             </View>
           ) : null}
         </View>
+            </>
+          )}
+        </Animated.View>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  modalRoot: {
+    flex: 1,
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#020617',
+  },
   screen: {
     flex: 1,
     backgroundColor: '#0B1220',
     paddingTop: 54,
     paddingBottom: 28,
+  },
+  consentFill: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row',
@@ -453,6 +613,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  heroCard: {
+    marginHorizontal: 20,
+    marginBottom: 12,
+    height: 196,
+    borderRadius: 22,
+    overflow: 'hidden',
+    backgroundColor: '#1E293B',
+  },
+  heroImage: {
+    width: '100%',
+    height: '100%',
+  },
   garmentRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -462,12 +634,6 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 16,
     backgroundColor: 'rgba(248, 250, 252, 0.08)',
-  },
-  garmentThumb: {
-    width: 48,
-    height: 48,
-    borderRadius: 10,
-    backgroundColor: '#1E293B',
   },
   garmentCopy: {
     flex: 1,

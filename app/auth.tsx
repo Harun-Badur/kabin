@@ -9,12 +9,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import type { AuthStatus, SignUpResult } from '../types/auth';
-
-interface AuthScreenProps {
-  onSignIn: (email: string, password: string) => Promise<void>;
-  onSignUp: (email: string, password: string) => Promise<SignUpResult>;
-}
+import { useAuthContext } from '../hooks/useAuthContext';
+import { logger } from '../lib/logger';
+import type { AuthStatus } from '../types/auth';
 
 type AuthMode = 'login' | 'signup';
 
@@ -23,10 +20,8 @@ const MIN_PASSWORD_LENGTH = 6;
 const isValidEmail = (value: string): boolean =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 
-export default function AuthScreen({
-  onSignIn,
-  onSignUp,
-}: AuthScreenProps) {
+export default function AuthScreen() {
+  const { signIn, signUp } = useAuthContext();
   const [mode, setMode] = useState<AuthMode>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -60,11 +55,11 @@ export default function AuthScreen({
     setMessage(null);
     try {
       if (mode === 'login') {
-        await onSignIn(trimmedEmail, password);
+        await signIn({ email: trimmedEmail, password });
         setStatus('success');
         return;
       }
-      const result = await onSignUp(trimmedEmail, password);
+      const result = await signUp({ email: trimmedEmail, password });
       if (result.needsEmailConfirmation) {
         setIsInfoMessage(true);
         setMessage(
@@ -75,6 +70,15 @@ export default function AuthScreen({
       }
       setStatus('success');
     } catch (error) {
+      if (__DEV__) {
+        const supabaseMessage =
+          error instanceof Error && error.cause instanceof Error
+            ? error.cause.message
+            : error instanceof Error
+              ? error.message
+              : 'Bilinmeyen hata';
+        logger.error('Auth işlemi başarısız', { detail: supabaseMessage });
+      }
       const text =
         error instanceof Error ? error.message : 'İşlem tamamlanamadı.';
       const isConfirmation = text.includes('Kayıt alındı');

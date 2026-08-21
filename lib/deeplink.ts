@@ -1,3 +1,4 @@
+import { logger } from './logger';
 import type { FeedProvider } from '../types/product';
 
 export type { FeedProvider };
@@ -31,7 +32,7 @@ const parseAffiliateTags = (): Record<string, string> => {
     }
     return tags;
   } catch (error) {
-    console.error('AFFILIATE_TAGS_JSON çözümlenemedi', { error });
+    logger.error('AFFILIATE_TAGS_JSON çözümlenemedi', { error });
     return {};
   }
 };
@@ -46,7 +47,7 @@ const appendQueryParam = (
     url.searchParams.set(name, value);
     return url.toString();
   } catch (error) {
-    console.error('Affiliate URL oluşturulamadı', { error, productUrl });
+    logger.error('Affiliate URL oluşturulamadı', { error, productUrl });
     const separator = productUrl.includes('?') ? '&' : '?';
     return `${productUrl}${separator}${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
   }

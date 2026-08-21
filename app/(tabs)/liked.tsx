@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
-  Image,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -12,8 +10,14 @@ import {
   Text,
   View,
 } from 'react-native';
-import VirtualTryOnModal from '../components/VirtualTryOnModal';
-import { useAppStore } from '../store/useAppStore';
+import { Image } from 'expo-image';
+import { useFocusEffect } from 'expo-router';
+import PressableScale from '../../components/PressableScale';
+import RefreshSpinner from '../../components/RefreshSpinner';
+import SkeletonShimmer from '../../components/SkeletonShimmer';
+import VirtualTryOnModal from '../../components/VirtualTryOnModal';
+import { logger } from '../../lib/logger';
+import { useAppStore } from '../../store/useAppStore';
 import {
   formatTryPrice,
   getDisplayPrice,
@@ -21,7 +25,11 @@ import {
   hasCatalogPriceDrop,
   type LikedProduct,
   type Product,
-} from '../types/product';
+} from '../../types/product';
+
+/** Sekmeye her dönüşte sorgu atmamak için taze sayılan süre. */
+const REFRESH_TTL_MS = 30_000;
+const LIKED_SKELETON_KEYS = ['s1', 's2', 's3'] as const;
 
 interface LikedItemProps {
   item: LikedProduct;
@@ -59,7 +67,9 @@ function LikedItem({
         <Image
           source={{ uri: product.imageUrl }}
           style={styles.image}
-          resizeMode="cover"
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          recyclingKey={product.id}
           onError={() => setHasImageError(true)}
         />
       )}
@@ -72,7 +82,7 @@ function LikedItem({
         </Text>
         <View style={styles.priceRow}>
           {hasDrop && typeof previousPrice === 'number' ? (
-            <Text style={styles.likedPrice}>
+            <Text style={styles.previousPrice}>
               {formatTryPrice(previousPrice)}
             </Text>
           ) : null}
@@ -100,24 +110,18 @@ function LikedItem({
         </View>
 
         <View style={styles.actions}>
-          <Pressable
+          <PressableScale
             onPress={() => onTryOn(product)}
-            style={({ pressed }) => [
-              styles.tryButton,
-              pressed ? styles.pressed : null,
-            ]}
+            style={styles.tryButton}
             accessibilityRole="button"
             accessibilityLabel="Tekrar dene"
           >
             <Text style={styles.tryButtonText}>Tekrar Dene</Text>
-          </Pressable>
-          <Pressable
+          </PressableScale>
+          <PressableScale
             onPress={() => onDelete(product)}
             disabled={isDeleting}
-            style={({ pressed }) => [
-              styles.deleteButton,
-              pressed || isDeleting ? styles.pressed : null,
-            ]}
+            style={styles.deleteButton}
             accessibilityRole="button"
             accessibilityLabel="Sil"
           >
@@ -126,18 +130,14 @@ function LikedItem({
             ) : (
               <Text style={styles.deleteButtonText}>Sil</Text>
             )}
-          </Pressable>
+          </PressableScale>
         </View>
       </View>
     </View>
   );
 }
 
-interface LikedScreenProps {
-  isFocused: boolean;
-}
-
-export default function LikedScreen({ isFocused }: LikedScreenProps) {
+export default function LikedScreen() {
   const likedProducts = useAppStore((state) => state.likedProducts);
   const sessionSyncStatus = useAppStore((state) => state.sessionSyncStatus);
   const unlikeProduct = useAppStore((state) => state.unlikeProduct);
@@ -149,34 +149,43 @@ export default function LikedScreen({ isFocused }: LikedScreenProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [hasFreshLoad, setHasFreshLoad] = useState(false);
+  const lastLoadedAtRef = useRef(0);
 
-  const reloadLikes = useCallback(async (): Promise<void> => {
-    setIsRefreshing(true);
-    try {
-      await refreshLikedProducts();
-    } catch {
-      Alert.alert(
-        'Yenilenemedi',
-        'Güncel fiyatlar alınamadı. Aşağı çekip tekrar dene.',
-      );
-    } finally {
-      setIsRefreshing(false);
-      setHasFreshLoad(true);
-    }
-  }, [refreshLikedProducts]);
+  const reloadLikes = useCallback(
+    async (force: boolean): Promise<void> => {
+      if (!force && Date.now() - lastLoadedAtRef.current < REFRESH_TTL_MS) {
+        return;
+      }
 
-  useEffect(() => {
-    if (!isFocused) {
-      return;
-    }
-    void reloadLikes();
-  }, [isFocused, reloadLikes]);
+      setIsRefreshing(true);
+      try {
+        await refreshLikedProducts();
+        lastLoadedAtRef.current = Date.now();
+      } catch {
+        // Zaman damgası güncellenmedi; sonraki odakta tekrar denenir.
+        Alert.alert(
+          'Yenilenemedi',
+          'Güncel fiyatlar alınamadı. Aşağı çekip tekrar dene.',
+        );
+      } finally {
+        setIsRefreshing(false);
+        setHasFreshLoad(true);
+      }
+    },
+    [refreshLikedProducts],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      void reloadLikes(false);
+    }, [reloadLikes]),
+  );
 
   const handleToggleNotify = useCallback(
     (productId: string, value: boolean): Promise<void> =>
       updateLikeAlert(productId, { notifyOnPriceDrop: value }).catch(
         (error: unknown) => {
-          console.error('Alarm anahtarı güncellenemedi', { error });
+          logger.error('Alarm anahtarı güncellenemedi', { error });
           Alert.alert(
             'Kaydedilemedi',
             'Fiyat alarmı güncellenirken bir sorun oluştu.',
@@ -200,7 +209,7 @@ export default function LikedScreen({ isFocused }: LikedScreenProps) {
               setDeletingId(product.id);
               void unlikeProduct(product.id)
                 .catch((error: unknown) => {
-                  console.error('Beğeni silinemedi', { error });
+                  logger.error('Beğeni silinemedi', { error });
                   Alert.alert(
                     'Silinemedi',
                     'Beğeni kaldırılırken bir sorun oluştu. Tekrar dene.',
@@ -219,9 +228,20 @@ export default function LikedScreen({ isFocused }: LikedScreenProps) {
 
   if (sessionSyncStatus === 'loading' || !hasFreshLoad) {
     return (
-      <View style={styles.centered}>
-        <ActivityIndicator color="#0F172A" size="large" />
-        <Text style={styles.loadingText}>Dolabın hazırlanıyor...</Text>
+      <View style={styles.root}>
+        <Text style={styles.header}>Beğenilenler</Text>
+        <View style={styles.list}>
+          {LIKED_SKELETON_KEYS.map((key) => (
+            <View key={key} style={styles.card}>
+              <SkeletonShimmer width={112} height={148} borderRadius={0} />
+              <View style={styles.skeletonMeta}>
+                <SkeletonShimmer width={88} height={10} borderRadius={6} />
+                <SkeletonShimmer width={160} height={14} borderRadius={6} />
+                <SkeletonShimmer width={72} height={16} borderRadius={6} />
+              </View>
+            </View>
+          ))}
+        </View>
       </View>
     );
   }
@@ -230,15 +250,18 @@ export default function LikedScreen({ isFocused }: LikedScreenProps) {
     <View style={styles.root}>
       <Text style={styles.header}>Beğenilenler</Text>
       {likedProducts.length === 0 ? (
-        <ScrollView
+        <View style={styles.flex}>
+          <RefreshSpinner visible={isRefreshing} />
+          <ScrollView
           contentContainerStyle={styles.centered}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={() => {
-                void reloadLikes();
+                void reloadLikes(true);
               }}
-              tintColor="#0F172A"
+              tintColor="transparent"
+              colors={['transparent']}
             />
           }
         >
@@ -246,19 +269,23 @@ export default function LikedScreen({ isFocused }: LikedScreenProps) {
           <Text style={styles.emptyTitle}>
             Henüz beğendiğin ürün yok. Keşfetmeye başla!
           </Text>
-        </ScrollView>
+          </ScrollView>
+        </View>
       ) : (
-        <FlatList
+        <View style={styles.flex}>
+          <RefreshSpinner visible={isRefreshing} />
+          <FlatList
           data={likedProducts}
-          keyExtractor={(item) => item.likeId}
+          keyExtractor={(item) => item.product.id}
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={() => {
-                void reloadLikes();
+                void reloadLikes(true);
               }}
-              tintColor="#0F172A"
+              tintColor="transparent"
+              colors={['transparent']}
             />
           }
           renderItem={({ item }) => (
@@ -273,6 +300,7 @@ export default function LikedScreen({ isFocused }: LikedScreenProps) {
             />
           )}
         />
+        </View>
       )}
       <VirtualTryOnModal
         visible={tryOnProduct !== null}
@@ -288,6 +316,9 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F8FAFC',
     paddingTop: 56,
+  },
+  flex: {
+    flex: 1,
   },
   header: {
     fontSize: 28,
@@ -334,6 +365,12 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     justifyContent: 'space-between',
   },
+  skeletonMeta: {
+    flex: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    justifyContent: 'space-between',
+  },
   brand: {
     fontSize: 11,
     fontWeight: '700',
@@ -355,7 +392,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     flexWrap: 'wrap',
   },
-  likedPrice: {
+  previousPrice: {
     fontSize: 13,
     fontWeight: '600',
     color: '#94A3B8',
@@ -422,9 +459,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  pressed: {
-    opacity: 0.75,
-  },
   centered: {
     flex: 1,
     alignItems: 'center',
@@ -442,10 +476,5 @@ const styles = StyleSheet.create({
     color: '#475569',
     textAlign: 'center',
     lineHeight: 26,
-  },
-  loadingText: {
-    marginTop: 12,
-    color: '#64748B',
-    fontWeight: '600',
   },
 });

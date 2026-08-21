@@ -20,10 +20,7 @@ export interface Product {
 }
 
 export interface LikedProduct {
-  likeId: string;
   product: Product;
-  likedPrice: number;
-  targetPrice: number | null;
   notifyOnPriceDrop: boolean;
   likedAt: string;
 }
@@ -67,12 +64,14 @@ export const formatTryPrice = (price: number): string =>
   `₺${price.toFixed(2)}`;
 
 export const getDropPercent = (
-  likedPrice: number,
+  referencePrice: number,
   livePrice: number,
 ): number => {
-  if (likedPrice <= 0 || livePrice >= likedPrice) {
+  if (referencePrice <= 0 || livePrice >= referencePrice) {
     return 0;
   }
-  const percent = Math.round(((likedPrice - livePrice) / likedPrice) * 100);
+  const percent = Math.round(
+    ((referencePrice - livePrice) / referencePrice) * 100,
+  );
   return Math.max(1, percent);
 };

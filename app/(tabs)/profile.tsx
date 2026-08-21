@@ -3,24 +3,18 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
-  Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { PRIVACY_URL } from '../lib/privacy';
-import { deleteAccount } from '../services/accountService';
-import type { AuthUser } from '../types/auth';
+import { useAuthContext } from '../../hooks/useAuthContext';
+import PressableScale from '../../components/PressableScale';
+import { logger } from '../../lib/logger';
+import { PRIVACY_URL } from '../../lib/privacy';
+import { deleteAccount } from '../../services/accountService';
 
-interface ProfileScreenProps {
-  user: AuthUser;
-  onSignOut: () => Promise<void>;
-}
-
-export default function ProfileScreen({
-  user,
-  onSignOut,
-}: ProfileScreenProps) {
+export default function ProfileScreen() {
+  const { user, signOut } = useAuthContext();
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -31,7 +25,7 @@ export default function ProfileScreen({
     setIsSigningOut(true);
     setErrorMessage(null);
     try {
-      await onSignOut();
+      await signOut();
     } catch (error) {
       setErrorMessage(
         error instanceof Error ? error.message : 'Çıkış yapılamadı.',
@@ -46,7 +40,7 @@ export default function ProfileScreen({
     setErrorMessage(null);
     try {
       await deleteAccount();
-      await onSignOut();
+      await signOut();
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Hesap silinemedi.';
@@ -76,7 +70,7 @@ export default function ProfileScreen({
 
   const handleOpenPrivacy = (): void => {
     void Linking.openURL(PRIVACY_URL).catch((error: unknown) => {
-      console.error('Gizlilik politikası açılamadı', { error });
+      logger.error('Gizlilik politikası açılamadı', { error });
       Alert.alert(
         'Bağlantı açılamadı',
         'Gizlilik politikası bu cihazda açılamadı.',
@@ -89,7 +83,7 @@ export default function ProfileScreen({
       <Text style={styles.header}>Profil</Text>
       <View style={styles.card}>
         <Text style={styles.label}>E-posta</Text>
-        <Text style={styles.email}>{user.email ?? 'E-posta yok'}</Text>
+        <Text style={styles.email}>{user?.email ?? 'E-posta yok'}</Text>
         <Text style={styles.hint}>
           Bu ekran yakında dolap tercihleri ve beden bilgisi için
           genişleyecek.
@@ -97,26 +91,20 @@ export default function ProfileScreen({
         {errorMessage ? (
           <Text style={styles.error}>{errorMessage}</Text>
         ) : null}
-        <Pressable
+        <PressableScale
           onPress={handleOpenPrivacy}
-          style={({ pressed }) => [
-            styles.linkButton,
-            pressed ? styles.pressed : null,
-          ]}
+          style={styles.linkButton}
           accessibilityRole="link"
           accessibilityLabel="Gizlilik politikası"
         >
           <Text style={styles.linkButtonText}>Gizlilik Politikası</Text>
-        </Pressable>
-        <Pressable
+        </PressableScale>
+        <PressableScale
           onPress={() => {
             void handleSignOut();
           }}
           disabled={isBusy}
-          style={({ pressed }) => [
-            styles.signOut,
-            pressed || isBusy ? styles.pressed : null,
-          ]}
+          style={styles.signOut}
           accessibilityRole="button"
           accessibilityLabel="Çıkış yap"
         >
@@ -125,7 +113,7 @@ export default function ProfileScreen({
           ) : (
             <Text style={styles.signOutText}>Çıkış yap</Text>
           )}
-        </Pressable>
+        </PressableScale>
       </View>
 
       <View style={styles.dangerCard}>
@@ -134,13 +122,10 @@ export default function ProfileScreen({
           Hesabın ve tüm verilerin kalıcı olarak silinir. Bu işlem geri
           alınamaz.
         </Text>
-        <Pressable
+        <PressableScale
           onPress={handleDeleteAccount}
           disabled={isBusy}
-          style={({ pressed }) => [
-            styles.deleteButton,
-            pressed || isBusy ? styles.pressed : null,
-          ]}
+          style={styles.deleteButton}
           accessibilityRole="button"
           accessibilityLabel="Hesabımı sil"
         >
@@ -149,7 +134,7 @@ export default function ProfileScreen({
           ) : (
             <Text style={styles.deleteButtonText}>Hesabımı Sil</Text>
           )}
-        </Pressable>
+        </PressableScale>
       </View>
     </View>
   );
@@ -256,8 +241,5 @@ const styles = StyleSheet.create({
     color: '#F8FAFC',
     fontSize: 16,
     fontWeight: '800',
-  },
-  pressed: {
-    opacity: 0.75,
   },
 });

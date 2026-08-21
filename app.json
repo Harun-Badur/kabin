@@ -8,6 +8,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "primaryColor": "#0F172A",
+    "scheme": "kabin",
     "ios": {
       "bundleIdentifier": "app.kabin.mobile",
       "buildNumber": "1",
@@ -23,8 +24,7 @@
       },
       "permissions": [
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.INTERNET",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.INTERNET"
       ],
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO",
@@ -57,7 +57,8 @@
           "icon": "./assets/notification-icon.png",
           "color": "#0F172A"
         }
-      ]
+      ],
+      "expo-router"
     ],
     "extra": {
       "eas": {

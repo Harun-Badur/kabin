@@ -22,7 +22,6 @@ interface CatalogProductRow {
 interface LikedAlertRow {
   user_id: string;
   product_id: string;
-  target_price: number | string | null;
   notify_on_price_drop: boolean | null;
 }
 
@@ -213,7 +212,7 @@ const simulatePriceDrop = async (): Promise<void> => {
 
   const { data: likesData, error: likesError } = await supabase
     .from('liked_products')
-    .select('user_id, product_id, target_price, notify_on_price_drop')
+    .select('user_id, product_id, notify_on_price_drop')
     .eq('notify_on_price_drop', true)
     .in('product_id', droppedIds);
 
@@ -221,14 +220,9 @@ const simulatePriceDrop = async (): Promise<void> => {
     throw new Error(`Beğeniler okunamadı: ${likesError.message}`);
   }
 
-  const likes = (likesData ?? []).filter(isLikedAlertRow).filter((row) => {
-    const droppedProduct = droppedById.get(row.product_id);
-    if (!droppedProduct) {
-      return false;
-    }
-    const target = parseNumeric(row.target_price);
-    return target === null || droppedProduct.newPrice <= target;
-  });
+  const likes = (likesData ?? [])
+    .filter(isLikedAlertRow)
+    .filter((row) => droppedById.has(row.product_id));
 
   if (likes.length > 0) {
     const alertRows = likes.flatMap((like) => {

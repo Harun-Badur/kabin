@@ -1,6 +1,7 @@
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import { logger } from '../lib/logger';
 import { getRequiredSupabaseClient } from '../lib/supabase';
 
 const ANDROID_CHANNEL_ID = 'price-alerts';
@@ -35,7 +36,7 @@ const requestNotificationPermission = async (
   Notifications: NotificationsModule,
 ): Promise<boolean> => {
   if (!Device.isDevice) {
-    console.info(
+    logger.info(
       'Push bildirimleri yalnızca fiziksel cihazda çalışır (emülatör atlandı).',
     );
     return false;
@@ -49,7 +50,7 @@ const requestNotificationPermission = async (
   }
 
   if (status !== 'granted') {
-    console.info('Bildirim izni verilmedi.');
+    logger.info('Bildirim izni verilmedi.');
     return false;
   }
 
@@ -127,12 +128,10 @@ export const registerForPushNotifications = async (
     }
 
     await upsertPushToken(userId, expoPushToken);
-    console.info('Push token kaydedildi', { userId });
+    logger.info('Push token kaydedildi');
   } catch (error: unknown) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Push bildirimi kaydı başarısız oldu.';
-    console.info('Push kaydı atlandı', { message, error, userId });
+    // Push kaydı uygulamanın çalışması için zorunlu değil; LogBox'ta kırmızı
+    // görünmemesi ve kullanıcıyı korkutmaması için info seviyesinde kalıyor.
+    logger.info('Push kaydı atlandı', { error });
   }
 };

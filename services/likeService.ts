@@ -1,17 +1,14 @@
+import { logger } from '../lib/logger';
 import { parseNumeric, parseOptionalNumeric } from '../lib/price';
 import { getRequiredSupabaseClient } from '../lib/supabase';
 import type { AuthUser } from '../types/auth';
 import type { FeedProvider, LikedProduct, Product } from '../types/product';
-import { getDisplayPrice } from '../types/product';
 import type { GarmentCategory } from '../types/vton';
 
 interface LikedProductRow {
-  id: string;
   product_id: string;
   product_snapshot: unknown;
   liked_at: string;
-  liked_price?: number | string | null;
-  target_price?: number | string | null;
   notify_on_price_drop?: boolean | null;
 }
 
@@ -30,8 +27,7 @@ interface CatalogPriceRow {
 export interface UpdateLikeAlertParams {
   userId: string;
   productId: string;
-  notifyOnPriceDrop?: boolean;
-  targetPrice?: number | null;
+  notifyOnPriceDrop: boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -85,9 +81,7 @@ const isLikedProductRow = (value: unknown): value is LikedProductRow => {
     return false;
   }
   return (
-    typeof value.id === 'string' &&
-    typeof value.product_id === 'string' &&
-    typeof value.liked_at === 'string'
+    typeof value.product_id === 'string' && typeof value.liked_at === 'string'
   );
 };
 
@@ -151,34 +145,18 @@ const fetchCatalogPrices = async (
   }
 
   const client = getRequiredSupabaseClient();
-  const withPriceColumns =
-    'id, price, current_price, previous_price, last_price_checked_at';
-  const first = await client
+  const { data, error } = await client
     .from('products')
-    .select(withPriceColumns)
+    .select('id, price, current_price, previous_price, last_price_checked_at')
     .in('id', productIds);
 
-  let rows: unknown[] = first.data ?? [];
-  let queryError = first.error;
-
-  if (queryError?.message.toLowerCase().includes('current_price')) {
-    const retry = await client
-      .from('products')
-      .select('id, price')
-      .in('id', productIds);
-    rows = retry.data ?? [];
-    queryError = retry.error;
-  }
-
-  if (queryError) {
-    console.error('Katalog fiyatları okunamadı', {
-      message: queryError.message,
-    });
+  if (error) {
+    logger.error('Katalog fiyatları okunamadı', { detail: error.message });
     return new Map();
   }
 
   const map = new Map<string, CatalogPriceRow>();
-  rows.filter(isCatalogPriceRow).forEach((row) => {
+  (data ?? []).filter(isCatalogPriceRow).forEach((row) => {
     map.set(row.id, row);
   });
   return map;
@@ -190,60 +168,33 @@ export const fetchLikedProducts = async (
   const client = getRequiredSupabaseClient();
   const { data, error } = await client
     .from('liked_products')
-    .select(
-      'id, product_id, product_snapshot, liked_at, liked_price, target_price, notify_on_price_drop',
-    )
+    .select('product_id, product_snapshot, liked_at, notify_on_price_drop')
     .eq('user_id', userId)
     .order('liked_at', { ascending: false });
 
   if (error) {
-    const message = error.message.toLowerCase();
-    if (message.includes('liked_price') || message.includes('target_price')) {
-      const fallback = await client
-        .from('liked_products')
-        .select('id, product_id, product_snapshot, liked_at')
-        .eq('user_id', userId)
-        .order('liked_at', { ascending: false });
-      if (fallback.error) {
-        throw new Error(`Beğeniler yüklenemedi: ${fallback.error.message}`);
-      }
-      const rows = (fallback.data ?? []).filter(isLikedProductRow);
-      const catalog = await fetchCatalogPrices(rows.map((row) => row.product_id));
-      return mapLikedRows(rows, catalog);
-    }
     throw new Error(`Beğeniler yüklenemedi: ${error.message}`);
   }
 
   const rows = (data ?? []).filter(isLikedProductRow);
   const catalog = await fetchCatalogPrices(rows.map((row) => row.product_id));
-  return mapLikedRows(rows, catalog);
-};
 
-const mapLikedRows = (
-  rows: unknown[],
-  catalog: Map<string, CatalogPriceRow>,
-): LikedProduct[] =>
-  rows.filter(isLikedProductRow).flatMap((row) => {
+  return rows.flatMap((row) => {
     if (!isProductSnapshot(row.product_snapshot)) {
       return [];
     }
-    const snapshot = row.product_snapshot;
-    const product = applyCatalogPrices(snapshot, catalog.get(row.product_id));
-    const likedPrice =
-      parseNumeric(row.liked_price) ??
-      parseNumeric(snapshot.currentPrice) ??
-      snapshot.price;
     return [
       {
-        likeId: row.id,
-        product,
-        likedPrice,
-        targetPrice: parseNumeric(row.target_price),
+        product: applyCatalogPrices(
+          row.product_snapshot,
+          catalog.get(row.product_id),
+        ),
         notifyOnPriceDrop: row.notify_on_price_drop !== false,
         likedAt: row.liked_at,
       },
     ];
   });
+};
 
 export const fetchPassedProductIds = async (
   userId: string,
@@ -268,32 +219,17 @@ export const insertLikedProduct = async (
   product: Product,
 ): Promise<void> => {
   const client = getRequiredSupabaseClient();
-  const likedPrice = getDisplayPrice(product);
   const { error: likeError } = await client.from('liked_products').upsert(
     {
       user_id: userId,
       product_id: product.id,
       product_snapshot: toSnapshot(product),
       notify_on_price_drop: true,
-      liked_price: likedPrice,
     },
     { onConflict: 'user_id,product_id', ignoreDuplicates: true },
   );
 
-  if (likeError?.message.toLowerCase().includes('liked_price')) {
-    const retry = await client.from('liked_products').upsert(
-      {
-        user_id: userId,
-        product_id: product.id,
-        product_snapshot: toSnapshot(product),
-        notify_on_price_drop: true,
-      },
-      { onConflict: 'user_id,product_id', ignoreDuplicates: true },
-    );
-    if (retry.error) {
-      throw new Error(`Beğeni kaydedilemedi: ${retry.error.message}`);
-    }
-  } else if (likeError) {
+  if (likeError) {
     throw new Error(`Beğeni kaydedilemedi: ${likeError.message}`);
   }
 
@@ -304,17 +240,13 @@ export const insertLikedProduct = async (
     .eq('product_id', product.id);
 
   if (passError) {
-    console.error('Geçilen ürün beğenide temizlenemedi', {
-      message: passError.message,
+    logger.error('Geçilen ürün beğenide temizlenemedi', {
+      detail: passError.message,
       productId: product.id,
     });
   }
 
-  console.log('Beğeni Supabase\'e yazıldı', {
-    productId: product.id,
-    title: product.title,
-    userId,
-  });
+  logger.debug('Beğeni Supabase\'e yazıldı', { productId: product.id });
 };
 
 export const insertPassedProduct = async (
@@ -355,24 +287,11 @@ export const updateLikedProductAlert = async ({
   userId,
   productId,
   notifyOnPriceDrop,
-  targetPrice,
 }: UpdateLikeAlertParams): Promise<void> => {
   const client = getRequiredSupabaseClient();
-  const patch: Record<string, boolean | number | null> = {};
-  if (notifyOnPriceDrop !== undefined) {
-    patch.notify_on_price_drop = notifyOnPriceDrop;
-  }
-  if (targetPrice !== undefined) {
-    patch.target_price = targetPrice;
-  }
-
-  if (Object.keys(patch).length === 0) {
-    return;
-  }
-
   const { error } = await client
     .from('liked_products')
-    .update(patch)
+    .update({ notify_on_price_drop: notifyOnPriceDrop })
     .eq('user_id', userId)
     .eq('product_id', productId);
 

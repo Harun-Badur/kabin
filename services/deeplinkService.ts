@@ -1,5 +1,6 @@
 import { Alert, Linking } from 'react-native';
 import { buildAffiliateUrl } from '../lib/deeplink';
+import { logger } from '../lib/logger';
 import type { FeedProvider, Product } from '../types/product';
 
 // Trendyol ürün sayfası: /p/{contentId} kısa form.
@@ -47,7 +48,7 @@ export const parseAffiliateTagsJson = (): AffiliateTags => {
     }
     return tags;
   } catch (error) {
-    console.error('AFFILIATE_TAGS_JSON cozumlenemedi', { error });
+    logger.error('AFFILIATE_TAGS_JSON çözümlenemedi', { error });
     return {};
   }
 };
@@ -124,7 +125,7 @@ export const openProductPage = async (product: Product): Promise<void> => {
 
     await Linking.openURL(targetUrl);
   } catch (error) {
-    console.error('Failed to open product page', {
+    logger.error('Pazaryeri sayfası açılamadı', {
       error,
       productId: product.id,
     });

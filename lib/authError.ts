@@ -4,7 +4,19 @@ const AUTH_MESSAGE_BY_NEEDLE: Array<{ needle: string; message: string }> = [
     message: 'E-posta veya şifre hatalı.',
   },
   {
+    needle: 'invalid credentials',
+    message: 'E-posta veya şifre hatalı.',
+  },
+  {
+    needle: 'invalid_credentials',
+    message: 'E-posta veya şifre hatalı.',
+  },
+  {
     needle: 'email not confirmed',
+    message: 'E-postanı doğrulaman gerekiyor.',
+  },
+  {
+    needle: 'email_not_confirmed',
     message: 'E-postanı doğrulaman gerekiyor.',
   },
   {
@@ -22,6 +34,22 @@ const AUTH_MESSAGE_BY_NEEDLE: Array<{ needle: string; message: string }> = [
   {
     needle: 'email rate limit',
     message: 'Çok fazla deneme yapıldı. Biraz sonra tekrar dene.',
+  },
+  {
+    needle: 'over_email_send_rate_limit',
+    message: 'Çok fazla deneme yapıldı. Biraz sonra tekrar dene.',
+  },
+  {
+    needle: 'failed to fetch',
+    message: 'Sunucuya bağlanılamadı. İnternetini kontrol edip tekrar dene.',
+  },
+  {
+    needle: 'network request failed',
+    message: 'Sunucuya bağlanılamadı. İnternetini kontrol edip tekrar dene.',
+  },
+  {
+    needle: 'invalid api key',
+    message: 'Sunucu yapılandırması hatalı. Uygulamayı güncelleyip tekrar dene.',
   },
 ];
 

@@ -1,3 +1,4 @@
+import { logger } from '../lib/logger';
 import { getRequiredSupabaseClient } from '../lib/supabase';
 
 interface DeleteAccountResponse {
@@ -35,7 +36,7 @@ const readDetail = (body: string): string | null => {
       }
     }
   } catch (error) {
-    console.info('Hesap silme yanıtı çözümlenemedi', { error });
+    logger.warn('Hesap silme yanıtı çözümlenemedi', { error });
   }
   return null;
 };
@@ -45,7 +46,7 @@ export const deleteAccount = async (): Promise<void> => {
   const { data, error } = await client.auth.getSession();
 
   if (error) {
-    console.error('Oturum okunamadı', { message: error.message });
+    logger.error('Oturum okunamadı', { detail: error.message });
     throw new Error('Oturum doğrulanamadı. Çıkıp tekrar giriş yapmayı dene.');
   }
 
@@ -65,7 +66,7 @@ export const deleteAccount = async (): Promise<void> => {
   if (!response.ok) {
     const body = await response.text();
     const detail = readDetail(body);
-    console.error('Hesap silinemedi', { status: response.status, detail });
+    logger.error('Hesap silinemedi', { status: response.status, detail });
     throw new Error(detail ?? 'Hesap silinemedi. Lütfen tekrar dene.');
   }
 };

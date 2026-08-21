@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { Sparkles } from 'lucide-react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -8,25 +10,24 @@ import Animated, {
 import SwipeCard, {
   SWIPE_CARD_HEIGHT,
   SWIPE_CARD_WIDTH,
-} from '../components/SwipeCard';
-import VirtualTryOnModal from '../components/VirtualTryOnModal';
+} from '../../components/SwipeCard';
+import PressableScale from '../../components/PressableScale';
+import SkeletonShimmer from '../../components/SkeletonShimmer';
+import VirtualTryOnModal from '../../components/VirtualTryOnModal';
+import { useAuthContext } from '../../hooks/useAuthContext';
+import { logger } from '../../lib/logger';
 import {
   getRedirectLabel,
   openProductPage,
-} from '../services/deeplinkService';
-import { useAppStore } from '../store/useAppStore';
-import type { Product } from '../types/product';
+} from '../../services/deeplinkService';
+import { useAppStore } from '../../store/useAppStore';
+import type { Product } from '../../types/product';
 
 const VISIBLE_STACK_SIZE = 3;
 const STACK_SCALE_STEP = 0.05;
 const STACK_TRANSLATE_Y_STEP = 14;
 const STACK_SPRING = { damping: 16, stiffness: 160 } as const;
 const TOAST_DURATION_MS = 1600;
-
-interface FeedScreenProps {
-  canLike: boolean;
-  onRequireAuth: () => void;
-}
 
 interface StackSlotProps {
   product: Product;
@@ -43,7 +44,11 @@ interface StackSlotProps {
 function LoadingFeed() {
   return (
     <View style={styles.emptyState}>
-      <ActivityIndicator color="#0F172A" size="large" />
+      <SkeletonShimmer
+        width={SWIPE_CARD_WIDTH}
+        height={SWIPE_CARD_HEIGHT}
+        borderRadius={24}
+      />
       <Text style={styles.loadingTitle}>Ürünler yükleniyor...</Text>
       <Text style={styles.emptySubtitle}>
         Kabin feedi hazırlanıyor. Birazdan kaydırmaya başlayabilirsin.
@@ -60,6 +65,31 @@ function EmptyFeed() {
       <Text style={styles.emptySubtitle}>
         Beğendiğin parçalar dolabına eklendi. Yeni öneriler yakında.
       </Text>
+    </View>
+  );
+}
+
+interface ExhaustedFeedProps {
+  onRefresh: () => void;
+}
+
+function ExhaustedFeed({ onRefresh }: ExhaustedFeedProps) {
+  return (
+    <View style={styles.emptyState}>
+      <Text style={styles.emptyEmoji}>👀</Text>
+      <Text style={styles.emptyTitle}>Katalogdaki her şeyi gördün</Text>
+      <Text style={styles.emptySubtitle}>
+        Yeni ürünler eklendikçe haberdar ol: beğendiğin parçalarda fiyat alarmını
+        açık bırak, dolabına yeni öneriler düştüğünde bildirim gönderiyoruz.
+      </Text>
+      <PressableScale
+        onPress={onRefresh}
+        style={styles.refreshButton}
+        accessibilityRole="button"
+        accessibilityLabel="Yeni ürünleri kontrol et"
+      >
+        <Text style={styles.refreshButtonText}>Yeni ürünleri kontrol et</Text>
+      </PressableScale>
     </View>
   );
 }
@@ -118,33 +148,47 @@ function StackSlot({
   );
 }
 
-export default function FeedScreen({
-  canLike,
-  onRequireAuth,
-}: FeedScreenProps) {
+export default function FeedScreen() {
+  const router = useRouter();
+  const { user } = useAuthContext();
   const currentProducts = useAppStore((state) => state.currentProducts);
   const feedStatus = useAppStore((state) => state.feedStatus);
+  const feedIsPersonalized = useAppStore((state) => state.feedIsPersonalized);
+  const seenCount = useAppStore(
+    (state) => state.likedProducts.length + state.passedProductIds.length,
+  );
   const loadFeed = useAppStore((state) => state.loadFeed);
   const swipeRight = useAppStore((state) => state.swipeRight);
   const swipeLeft = useAppStore((state) => state.swipeLeft);
 
+  const userId = user?.id ?? null;
+  const canLike = user !== null;
+
+  const reloadFeed = useCallback((): void => {
+    void loadFeed(userId);
+  }, [loadFeed, userId]);
+
   useEffect(() => {
-    void loadFeed();
-  }, [loadFeed]);
+    reloadFeed();
+  }, [reloadFeed]);
+
+  const handleRequireAuth = useCallback((): void => {
+    router.push('/profile');
+  }, [router]);
 
   const handleSwipeRight = useCallback(
     (product: Product): void => {
       if (!canLike) {
-        onRequireAuth();
+        handleRequireAuth();
         return;
       }
       try {
         swipeRight(product);
       } catch (error) {
-        console.error('Failed to like product', { error, productId: product.id });
+        logger.error('Beğeni işlenemedi', { error, productId: product.id });
       }
     },
-    [canLike, onRequireAuth, swipeRight],
+    [canLike, handleRequireAuth, swipeRight],
   );
 
   const handleSwipeLeft = useCallback(
@@ -152,7 +196,7 @@ export default function FeedScreen({
       try {
         swipeLeft(product);
       } catch (error) {
-        console.error('Failed to pass product', { error, productId: product.id });
+        logger.error('Geçme işlenemedi', { error, productId: product.id });
       }
     },
     [swipeLeft],
@@ -197,37 +241,51 @@ export default function FeedScreen({
     [showToast],
   );
 
-  const visibleProducts = currentProducts.slice(0, VISIBLE_STACK_SIZE);
+  // En arkadaki kart ilk render edilir; zIndex sıralaması bu ters diziye dayanır.
+  const visibleSlots = useMemo(
+    () =>
+      currentProducts
+        .slice(0, VISIBLE_STACK_SIZE)
+        .map((product, depth) => ({ product, depth }))
+        .reverse(),
+    [currentProducts],
+  );
+
+  // Katalogda ürün var ama hepsi beğenildi/geçildi: tekrar yüklemek işe yaramaz,
+  // kullanıcıya yeni ürünlerden haberdar olma yolunu göster.
+  const isCatalogExhausted = visibleSlots.length === 0 && seenCount > 0;
 
   return (
     <View style={styles.container}>
       <Text style={styles.header}>Kabin</Text>
+      {feedIsPersonalized && visibleSlots.length > 0 ? (
+        <View style={styles.personalizedBadge} pointerEvents="none">
+          <Sparkles color="#0F172A" size={12} />
+          <Text style={styles.personalizedBadgeText}>Sana özel sıralandı</Text>
+        </View>
+      ) : null}
       {feedStatus === 'loading' || feedStatus === 'idle' ? (
         <LoadingFeed />
-      ) : visibleProducts.length === 0 ? (
+      ) : isCatalogExhausted ? (
+        <ExhaustedFeed onRefresh={reloadFeed} />
+      ) : visibleSlots.length === 0 ? (
         <EmptyFeed />
       ) : (
         <View style={styles.deck}>
-          {visibleProducts
-            .slice()
-            .reverse()
-            .map((product, renderIndex) => {
-              const depth = visibleProducts.length - 1 - renderIndex;
-              return (
-                <StackSlot
-                  key={product.id}
-                  product={product}
-                  depth={depth}
-                  isTop={depth === 0}
-                  canLike={canLike}
-                  onSwipeRight={handleSwipeRight}
-                  onSwipeLeft={handleSwipeLeft}
-                  onVirtualTryOn={handleVirtualTryOn}
-                  onBuy={handleBuy}
-                  onRequireAuth={onRequireAuth}
-                />
-              );
-            })}
+          {visibleSlots.map(({ product, depth }) => (
+            <StackSlot
+              key={product.id}
+              product={product}
+              depth={depth}
+              isTop={depth === 0}
+              canLike={canLike}
+              onSwipeRight={handleSwipeRight}
+              onSwipeLeft={handleSwipeLeft}
+              onVirtualTryOn={handleVirtualTryOn}
+              onBuy={handleBuy}
+              onRequireAuth={handleRequireAuth}
+            />
+          ))}
         </View>
       )}
       <VirtualTryOnModal
@@ -259,6 +317,23 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.6,
     color: '#0F172A',
+  },
+  personalizedBadge: {
+    position: 'absolute',
+    top: 62,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  personalizedBadgeText: {
+    color: '#0F172A',
+    fontSize: 11,
+    fontWeight: '700',
   },
   deck: {
     width: SWIPE_CARD_WIDTH,
@@ -297,6 +372,18 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     color: '#64748B',
     textAlign: 'center',
+  },
+  refreshButton: {
+    marginTop: 22,
+    backgroundColor: '#0F172A',
+    borderRadius: 14,
+    paddingHorizontal: 22,
+    paddingVertical: 14,
+  },
+  refreshButtonText: {
+    color: '#F8FAFC',
+    fontSize: 15,
+    fontWeight: '700',
   },
   toast: {
     position: 'absolute',

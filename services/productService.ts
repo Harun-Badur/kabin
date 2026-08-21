@@ -1,23 +1,36 @@
-import { parseOptionalNumeric } from '../lib/price';
 import { MOCK_PRODUCTS } from '../data/mockProducts';
 import { buildAffiliateUrl } from '../lib/deeplink';
+import { logger } from '../lib/logger';
+import { parseOptionalNumeric } from '../lib/price';
 import { getSupabaseClient } from '../lib/supabase';
 import type {
   FeedProductRow,
   FeedProvider,
   Product,
 } from '../types/product';
+import type { ScoredProduct, UserPreferences } from '../types/recommendation';
 import type { GarmentCategory } from '../types/vton';
+import { getUserPreferences, rankProducts } from './recommendationService';
 
 export type FeedSource = 'supabase' | 'mock';
 
 export interface FetchFeedProductsResult {
   products: Product[];
   source: FeedSource;
+  isPersonalized: boolean;
 }
 
 const DEFAULT_FEED_LIMIT = 20;
 const FETCH_POOL_MULTIPLIER = 4;
+
+/** Bu eşiğin altında profil güvenilir değil; feed yarı rastgele kalır. */
+const MIN_LIKES_FOR_FULL_RANKING = 5;
+/** Az veri varken skorlu payın oranı; kalanı rastgele kuyruktan gelir. */
+const RANKED_SHARE_WHEN_SPARSE = 0.5;
+/** Filtre balonunu kırmak için düşük skorlu havuzdan alınan keşif kartı sayısı. */
+const DISCOVERY_SLOT_COUNT = 3;
+/** Keşif kartlarının yerleştirileceği sıralar (0 tabanlı). */
+const DISCOVERY_POSITIONS = [1, 4, 7] as const;
 
 const isGarmentCategory = (value: string): value is GarmentCategory =>
   value === 'upper_body' || value === 'lower_body' || value === 'dresses';
@@ -112,63 +125,128 @@ const mapFeedRow = (row: FeedProductRow): Product | null => {
   };
 };
 
+/**
+ * Skorlu listeye keşif kartları serpiştirir. Kartlar en düşük skorlu yarıdan
+ * rastgele seçilir; kullanıcı en iyi eşleşmesiyle karşılaşsın diye en başa
+ * değil, ilk sıralara dağıtılırlar.
+ */
+const withDiscoverySlots = (
+  ranked: ScoredProduct[],
+  limit: number,
+): Product[] => {
+  const lowerHalfStart = Math.ceil(ranked.length / 2);
+  const discovery = shuffle(ranked.slice(lowerHalfStart)).slice(
+    0,
+    DISCOVERY_SLOT_COUNT,
+  );
+  const discoveryIds = new Set(discovery.map((item) => item.product.id));
+
+  const feed = ranked
+    .filter((item) => !discoveryIds.has(item.product.id))
+    .slice(0, Math.max(limit - discovery.length, 0))
+    .map((item) => item.product);
+
+  discovery.forEach((item, index) => {
+    const position = DISCOVERY_POSITIONS[index] ?? feed.length;
+    feed.splice(Math.min(position, feed.length), 0, item.product);
+  });
+
+  return feed.slice(0, limit);
+};
+
+/**
+ * Beğeni sayısı eşiğin altındayken skorlu ve rastgele yarıyı harmanlar.
+ * Rastgele pay zaten çeşitlilik sağladığı için ayrıca keşif kartı eklenmez.
+ */
+const blendWithRandom = (
+  ranked: ScoredProduct[],
+  limit: number,
+): Product[] => {
+  const rankedCount = Math.ceil(limit * RANKED_SHARE_WHEN_SPARSE);
+  const top = ranked.slice(0, rankedCount).map((item) => item.product);
+  const tail = shuffle(ranked.slice(rankedCount).map((item) => item.product));
+  return [...top, ...tail].slice(0, limit);
+};
+
+const arrangePersonalizedFeed = (
+  pool: Product[],
+  preferences: UserPreferences,
+  limit: number,
+): Product[] => {
+  const ranked = rankProducts(pool, preferences);
+
+  logger.debug('Feed skorları', {
+    likeCount: preferences.likeCount,
+    categoryCounts: preferences.categoryCounts,
+    priceRange: preferences.priceRange,
+    scores: ranked.map((item) => ({
+      title: item.product.title,
+      brand: item.product.brand,
+      score: Math.round(item.score * 100) / 100,
+    })),
+  });
+
+  return preferences.likeCount < MIN_LIKES_FOR_FULL_RANKING
+    ? blendWithRandom(ranked, limit)
+    : withDiscoverySlots(ranked, limit);
+};
+
 export const fetchFeedProducts = async (
   limit = DEFAULT_FEED_LIMIT,
+  userId: string | null = null,
 ): Promise<FetchFeedProductsResult> => {
   const client = getSupabaseClient();
 
   if (!client) {
-    console.warn('Supabase yapilandirmasi eksik; mock urunlere dusuluyor.');
-    return { products: MOCK_PRODUCTS, source: 'mock' };
+    logger.warn('Supabase yapılandırması eksik; mock ürünlere düşülüyor.');
+    return { products: MOCK_PRODUCTS, source: 'mock', isPersonalized: false };
   }
 
   try {
-    const withPriceColumns =
-      'id, provider, external_id, title, brand, price, current_price, previous_price, last_price_checked_at, currency, image_url, product_url, category, affiliate_url';
-    const withoutPriceColumns =
-      'id, provider, external_id, title, brand, price, currency, image_url, product_url, category, affiliate_url';
-
-    const first = await client
+    const { data, error } = await client
       .from('products')
-      .select(withPriceColumns)
+      .select(
+        'id, provider, external_id, title, brand, price, current_price, previous_price, last_price_checked_at, currency, image_url, product_url, category, affiliate_url',
+      )
       .limit(Math.max(limit * FETCH_POOL_MULTIPLIER, limit));
 
-    let rows: unknown[] = first.data ?? [];
-    let queryError = first.error;
-
-    if (queryError?.message.toLowerCase().includes('current_price')) {
-      const retry = await client
-        .from('products')
-        .select(withoutPriceColumns)
-        .limit(Math.max(limit * FETCH_POOL_MULTIPLIER, limit));
-      rows = retry.data ?? [];
-      queryError = retry.error;
-    }
-
-    if (queryError) {
-      console.error('Supabase urun feedi alinamadi; mock urunlere dusuluyor.', {
-        message: queryError.message,
+    if (error) {
+      logger.error('Supabase ürün feedi alınamadı; mock ürünlere düşülüyor.', {
+        detail: error.message,
       });
-      return { products: MOCK_PRODUCTS, source: 'mock' };
+      return { products: MOCK_PRODUCTS, source: 'mock', isPersonalized: false };
     }
 
-    const mapped = rows
+    const mapped = (data ?? [])
       .filter(isFeedProductRow)
       .map(mapFeedRow)
       .filter((product): product is Product => product !== null);
 
     if (mapped.length === 0) {
-      console.warn('Supabase products tablosu bos; mock urunlere dusuluyor.');
-      return { products: MOCK_PRODUCTS, source: 'mock' };
+      logger.warn('Supabase products tablosu boş; mock ürünlere düşülüyor.');
+      return { products: MOCK_PRODUCTS, source: 'mock', isPersonalized: false };
     }
 
-    const products = shuffle(mapped).slice(0, limit);
-    console.log(`Feed kaynagi: supabase (${products.length} urun)`);
-    return { products, source: 'supabase' };
+    const preferences = userId ? await getUserPreferences(userId) : null;
+
+    // Oturum yoksa ya da hiç beğeni yoksa eski rastgele davranış korunur.
+    if (!preferences || preferences.likeCount === 0) {
+      return {
+        products: shuffle(mapped).slice(0, limit),
+        source: 'supabase',
+        isPersonalized: false,
+      };
+    }
+
+    return {
+      products: arrangePersonalizedFeed(mapped, preferences, limit),
+      source: 'supabase',
+      isPersonalized: true,
+    };
   } catch (error) {
-    console.error('Urun feedi beklenmeyen hatayla dustu; mock kullaniliyor.', {
+    logger.error('Ürün feedi beklenmeyen hatayla düştü; mock kullanılıyor.', {
       error,
     });
-    return { products: MOCK_PRODUCTS, source: 'mock' };
+    return { products: MOCK_PRODUCTS, source: 'mock', isPersonalized: false };
   }
 };

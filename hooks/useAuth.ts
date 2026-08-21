@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../lib/supabase';
+import { logger } from '../lib/logger';
 import { toTurkishAuthMessage } from '../lib/authError';
 import { ensureUserProfile } from '../services/likeService';
 import type { AuthUser, SignInParams, SignUpParams, SignUpResult } from '../types/auth';
@@ -47,7 +48,7 @@ export const useAuth = (): UseAuthResult => {
           setUser(mapAuthUser(data.session?.user));
         }
       } catch (error) {
-        console.error('Oturum okunamadı', { error });
+        logger.error('Oturum okunamadı', { error });
         if (isMounted) {
           setUser(null);
         }
@@ -88,7 +89,10 @@ export const useAuth = (): UseAuthResult => {
     });
 
     if (error) {
-      throw new Error(toTurkishAuthMessage(error));
+      if (__DEV__) {
+        logger.error('Supabase giriş hatası', { detail: error.message });
+      }
+      throw new Error(toTurkishAuthMessage(error), { cause: error });
     }
 
     const mapped = mapAuthUser(data.user);
@@ -96,7 +100,7 @@ export const useAuth = (): UseAuthResult => {
       try {
         await ensureUserProfile(mapped);
       } catch (profileError) {
-        console.error('Profil senkronu başarısız', { profileError });
+        logger.error('Profil senkronu başarısız', { error: profileError });
       }
     }
   }, []);
@@ -113,7 +117,10 @@ export const useAuth = (): UseAuthResult => {
     });
 
     if (error) {
-      throw new Error(toTurkishAuthMessage(error));
+      if (__DEV__) {
+        logger.error('Supabase kayıt hatası', { detail: error.message });
+      }
+      throw new Error(toTurkishAuthMessage(error), { cause: error });
     }
 
     const mapped = mapAuthUser(data.user);
@@ -121,7 +128,7 @@ export const useAuth = (): UseAuthResult => {
       try {
         await ensureUserProfile(mapped);
       } catch (profileError) {
-        console.error('Profil senkronu başarısız', { profileError });
+        logger.error('Profil senkronu başarısız', { error: profileError });
       }
       return { needsEmailConfirmation: false };
     }
