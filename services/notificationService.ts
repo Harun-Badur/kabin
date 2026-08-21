@@ -3,6 +3,7 @@ import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { logger } from '../lib/logger';
 import { getRequiredSupabaseClient } from '../lib/supabase';
+import { colors } from '../lib/theme';
 
 const ANDROID_CHANNEL_ID = 'price-alerts';
 const ANDROID_CHANNEL_NAME = 'Fiyat alarmları';
@@ -68,7 +69,7 @@ const ensureAndroidChannel = async (
     name: ANDROID_CHANNEL_NAME,
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: [0, 250, 250, 250],
-    lightColor: '#0F172A',
+    lightColor: colors.accent,
   });
 };
 

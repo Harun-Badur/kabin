@@ -11,6 +11,7 @@ import { useAuthContext } from '../../hooks/useAuthContext';
 import PressableScale from '../../components/PressableScale';
 import { logger } from '../../lib/logger';
 import { PRIVACY_URL } from '../../lib/privacy';
+import { colors, radius, shadows, spacing } from '../../lib/theme';
 import { deleteAccount } from '../../services/accountService';
 
 export default function ProfileScreen() {
@@ -54,7 +55,7 @@ export default function ProfileScreen() {
   const handleDeleteAccount = (): void => {
     Alert.alert(
       'Hesabımı sil',
-      'Hesabın ve tüm verilerin (beğeniler, geçilen ürünler, fiyat alarmları, bildirim kayıtları) kalıcı olarak silinecek. Bu işlem geri alınamaz.',
+      'Hesabın ve tüm verilerin (beğeniler, geçilen ürünler, bildirim kayıtları) kalıcı olarak silinecek. Bu işlem geri alınamaz.',
       [
         { text: 'Vazgeç', style: 'cancel' },
         {
@@ -85,8 +86,7 @@ export default function ProfileScreen() {
         <Text style={styles.label}>E-posta</Text>
         <Text style={styles.email}>{user?.email ?? 'E-posta yok'}</Text>
         <Text style={styles.hint}>
-          Bu ekran yakında dolap tercihleri ve beden bilgisi için
-          genişleyecek.
+          Bu ekran yakında dolap tercihleri ve beden bilgisi için genişleyecek.
         </Text>
         {errorMessage ? (
           <Text style={styles.error}>{errorMessage}</Text>
@@ -109,7 +109,7 @@ export default function ProfileScreen() {
           accessibilityLabel="Çıkış yap"
         >
           {isSigningOut ? (
-            <ActivityIndicator color="#DC2626" />
+            <ActivityIndicator color={colors.text} />
           ) : (
             <Text style={styles.signOutText}>Çıkış yap</Text>
           )}
@@ -130,7 +130,7 @@ export default function ProfileScreen() {
           accessibilityLabel="Hesabımı sil"
         >
           {isDeleting ? (
-            <ActivityIndicator color="#F8FAFC" />
+            <ActivityIndicator color={colors.destructive} />
           ) : (
             <Text style={styles.deleteButtonText}>Hesabımı Sil</Text>
           )}
@@ -143,103 +143,100 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.bgSoft,
     paddingTop: 56,
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.xl,
   },
   header: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#0F172A',
-    marginBottom: 20,
+    color: colors.text,
+    marginBottom: spacing.xl,
   },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.06,
-    shadowRadius: 16,
-    elevation: 4,
+    backgroundColor: colors.surface,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    padding: spacing.xl,
+    ...shadows.card,
   },
   label: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#64748B',
+    color: colors.textSecondary,
     letterSpacing: 0.6,
     textTransform: 'uppercase',
-    marginBottom: 6,
+    marginBottom: spacing.sm,
   },
   email: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#0F172A',
-    marginBottom: 12,
+    color: colors.text,
+    marginBottom: spacing.md,
   },
   hint: {
     fontSize: 14,
     lineHeight: 21,
-    color: '#64748B',
-    marginBottom: 20,
+    color: colors.textSecondary,
+    marginBottom: spacing.xl,
   },
   error: {
-    color: '#DC2626',
+    color: colors.destructive,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   linkButton: {
-    paddingVertical: 12,
+    paddingVertical: spacing.md,
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   linkButtonText: {
-    color: '#0F172A',
+    color: colors.accentDark,
     fontSize: 15,
     fontWeight: '700',
     textDecorationLine: 'underline',
   },
   signOut: {
     borderWidth: 1,
-    borderColor: '#FECACA',
-    borderRadius: 14,
-    paddingVertical: 14,
+    borderColor: colors.border,
+    borderRadius: radius.button,
+    paddingVertical: spacing.lg,
     alignItems: 'center',
   },
   signOutText: {
-    color: '#DC2626',
+    color: colors.text,
     fontSize: 16,
     fontWeight: '800',
   },
   dangerCard: {
-    marginTop: 20,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
+    marginTop: spacing.xl,
+    backgroundColor: colors.surface,
+    borderRadius: radius.card,
+    padding: spacing.xl,
     borderWidth: 1,
-    borderColor: '#FECACA',
+    borderColor: colors.hairline,
   },
   dangerTitle: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#B91C1C',
-    marginBottom: 6,
+    color: colors.text,
+    marginBottom: spacing.sm,
   },
   dangerHint: {
     fontSize: 14,
     lineHeight: 21,
-    color: '#64748B',
-    marginBottom: 16,
+    color: colors.textSecondary,
+    marginBottom: spacing.lg,
   },
+  // Yıkıcı eylem vurgulu blok değil, minimal metin butonu.
   deleteButton: {
-    backgroundColor: '#DC2626',
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingVertical: spacing.md,
   },
   deleteButtonText: {
-    color: '#F8FAFC',
-    fontSize: 16,
-    fontWeight: '800',
+    color: colors.destructive,
+    fontSize: 15,
+    fontWeight: '700',
   },
 });

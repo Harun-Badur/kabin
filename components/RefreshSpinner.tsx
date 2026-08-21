@@ -10,6 +10,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { SPINNER_ROTATION_DURATION_MS } from '../lib/motion';
+import { colors, shadows, spacing } from '../lib/theme';
 
 interface RefreshSpinnerProps {
   visible: boolean;
@@ -51,7 +52,7 @@ export default function RefreshSpinner({ visible }: RefreshSpinnerProps) {
   return (
     <View style={styles.wrap} pointerEvents="none">
       <Animated.View style={spinStyle}>
-        <RefreshCw color="#0F172A" size={22} strokeWidth={2.4} />
+        <RefreshCw color={colors.accent} size={22} strokeWidth={2.4} />
       </Animated.View>
     </View>
   );
@@ -60,19 +61,17 @@ export default function RefreshSpinner({ visible }: RefreshSpinnerProps) {
 const styles = StyleSheet.create({
   wrap: {
     position: 'absolute',
-    top: 8,
+    top: spacing.sm,
     alignSelf: 'center',
     zIndex: 4,
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 6,
+    ...shadows.chip,
   },
 });

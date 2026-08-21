@@ -2,8 +2,12 @@ import { logger } from '../lib/logger';
 import { parseNumeric, parseOptionalNumeric } from '../lib/price';
 import { getRequiredSupabaseClient } from '../lib/supabase';
 import type { AuthUser } from '../types/auth';
-import type { FeedProvider, LikedProduct, Product } from '../types/product';
-import type { GarmentCategory } from '../types/vton';
+import {
+  isProductSnapshot,
+  type FeedProvider,
+  type LikedProduct,
+  type Product,
+} from '../types/product';
 
 interface LikedProductRow {
   product_id: string;
@@ -33,31 +37,11 @@ export interface UpdateLikeAlertParams {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
-const isGarmentCategory = (value: unknown): value is GarmentCategory =>
-  value === 'upper_body' || value === 'lower_body' || value === 'dresses';
-
 const isFeedProvider = (value: unknown): value is FeedProvider =>
   value === 'amazon' ||
   value === 'trendyol' ||
   value === 'hepsiburada' ||
   value === 'mock';
-
-const isProductSnapshot = (value: unknown): value is Product => {
-  if (!isRecord(value)) {
-    return false;
-  }
-  const price = value.price;
-  return (
-    typeof value.id === 'string' &&
-    typeof value.imageUrl === 'string' &&
-    typeof value.title === 'string' &&
-    typeof price === 'number' &&
-    Number.isFinite(price) &&
-    typeof value.brand === 'string' &&
-    isGarmentCategory(value.category) &&
-    typeof value.garmentDescription === 'string'
-  );
-};
 
 const toSnapshot = (product: Product): Product => ({
   id: product.id,
@@ -224,6 +208,8 @@ export const insertLikedProduct = async (
       user_id: userId,
       product_id: product.id,
       product_snapshot: toSnapshot(product),
+      // Fiyat alarmı kullanıcı ayarı değil sistem davranışı: her beğeni
+      // takibe girer, arayüzde anahtar yoktur.
       notify_on_price_drop: true,
     },
     { onConflict: 'user_id,product_id', ignoreDuplicates: true },

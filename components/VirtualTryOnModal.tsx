@@ -27,6 +27,7 @@ import Animated, {
 import { ImageIcon, RotateCcw, Sparkles, X } from 'lucide-react-native';
 import PressableScale from './PressableScale';
 import { grantVtonConsent, hasVtonConsent } from '../lib/consent';
+import { hapticSuccess } from '../lib/haptics';
 import { logger } from '../lib/logger';
 import {
   CONSENT_ENTER_DURATION_MS,
@@ -35,6 +36,7 @@ import {
   MODAL_SLIDE_DURATION_MS,
 } from '../lib/motion';
 import { PRIVACY_URL } from '../lib/privacy';
+import { colors, radius, spacing } from '../lib/theme';
 import {
   tryOnGarment,
   VtonServiceError,
@@ -43,6 +45,7 @@ import type { Product } from '../types/product';
 import type { TryOnStatus } from '../types/vton';
 
 const IMAGE_MAX_WIDTH = 768;
+const ICON_SIZE = 16;
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_CLOSE_DURATION_MS = 220;
 
@@ -304,6 +307,7 @@ export default function VirtualTryOnModal({
       });
       setResultImageUrl(outputUrl);
       setStatus('success');
+      hapticSuccess();
     } catch (error) {
       const message =
         error instanceof VtonServiceError
@@ -360,7 +364,7 @@ export default function VirtualTryOnModal({
           {isConsentFlow ? (
             consentStatus === 'checking' ? (
               <View style={styles.centerBlock}>
-                <ActivityIndicator color="#F8FAFC" size="large" />
+                <ActivityIndicator color={colors.accent} size="large" />
               </View>
             ) : (
               <Animated.View style={[styles.consentFill, consentEnterStyle]}>
@@ -432,7 +436,7 @@ export default function VirtualTryOnModal({
             accessibilityRole="button"
             accessibilityLabel="Kapat"
           >
-            <X color="#F8FAFC" size={22} />
+            <X color={colors.text} size={22} />
           </PressableScale>
         </View>
 
@@ -458,9 +462,9 @@ export default function VirtualTryOnModal({
           {status === 'loading' ? (
             <View style={styles.centerBlock}>
               <Animated.View style={[styles.loadingOrb, pulseStyle]}>
-                <Sparkles color="#F8FAFC" size={36} />
+                <Sparkles color={colors.accent} size={36} />
               </Animated.View>
-              <ActivityIndicator color="#F8FAFC" style={styles.spinner} />
+              <ActivityIndicator color={colors.accent} style={styles.spinner} />
               <Text style={styles.loadingText}>
                 AI seni giydiriyor... (ilk deneme 1-2 dk sürebilir)
               </Text>
@@ -499,7 +503,7 @@ export default function VirtualTryOnModal({
                 />
               ) : (
                 <View style={styles.placeholder}>
-                  <ImageIcon color="#94A3B8" size={42} />
+                  <ImageIcon color={colors.textSecondary} size={42} />
                   <Text style={styles.placeholderTitle}>Fotoğrafını seç</Text>
                   <Text style={styles.placeholderHint}>
                     Ayakta, net ve mümkünse 3:4 oranlı bir kare en iyi sonucu verir.
@@ -531,7 +535,7 @@ export default function VirtualTryOnModal({
           {status === 'success' ? (
             <View style={styles.footerRow}>
               <PressableScale onPress={handleRetry} style={styles.secondaryButton}>
-                <RotateCcw color="#F8FAFC" size={16} />
+                <RotateCcw color={colors.text} size={ICON_SIZE} />
                 <Text style={styles.secondaryButtonText}>Tekrar Dene</Text>
               </PressableScale>
               <PressableScale onPress={handleClose} style={styles.primaryButton}>
@@ -570,11 +574,11 @@ const styles = StyleSheet.create({
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#020617',
+    backgroundColor: colors.backdrop,
   },
   screen: {
     flex: 1,
-    backgroundColor: '#0B1220',
+    backgroundColor: colors.bg,
     paddingTop: 54,
     paddingBottom: 28,
   },
@@ -585,41 +589,45 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    marginBottom: 16,
+    paddingHorizontal: spacing.xl,
+    marginBottom: spacing.lg,
   },
   headerCopy: {
     flex: 1,
-    marginRight: 12,
+    marginRight: spacing.md,
   },
   kicker: {
-    color: '#94A3B8',
+    color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 1.4,
     textTransform: 'uppercase',
-    marginBottom: 4,
+    marginBottom: spacing.xs,
   },
   title: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 22,
     fontWeight: '800',
   },
   closeButton: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(248, 250, 252, 0.08)',
+    borderRadius: radius.chip,
+    backgroundColor: colors.bgSoft,
+    borderWidth: 1,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
   },
   heroCard: {
-    marginHorizontal: 20,
-    marginBottom: 12,
+    marginHorizontal: spacing.xl,
+    marginBottom: spacing.md,
     height: 196,
-    borderRadius: 22,
+    borderRadius: radius.card,
     overflow: 'hidden',
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.bgSoft,
+    borderWidth: 1,
+    borderColor: colors.hairline,
   },
   heroImage: {
     width: '100%',
@@ -628,18 +636,20 @@ const styles = StyleSheet.create({
   garmentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginHorizontal: 20,
-    marginBottom: 16,
-    padding: 10,
-    borderRadius: 16,
-    backgroundColor: 'rgba(248, 250, 252, 0.08)',
+    gap: spacing.md,
+    marginHorizontal: spacing.xl,
+    marginBottom: spacing.lg,
+    padding: spacing.md,
+    borderRadius: radius.button,
+    backgroundColor: colors.bgSoft,
+    borderWidth: 1,
+    borderColor: colors.hairline,
   },
   garmentCopy: {
     flex: 1,
   },
   garmentKicker: {
-    color: '#94A3B8',
+    color: colors.textSecondary,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.8,
@@ -647,19 +657,21 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   garmentTitle: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 16,
     fontWeight: '700',
   },
   body: {
     flex: 1,
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.xl,
   },
   previewBlock: {
     flex: 1,
-    borderRadius: 28,
+    borderRadius: radius.card,
     overflow: 'hidden',
-    backgroundColor: '#111827',
+    backgroundColor: colors.bgSoft,
+    borderWidth: 1,
+    borderColor: colors.hairline,
   },
   previewImage: {
     width: '100%',
@@ -669,17 +681,17 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 28,
+    paddingHorizontal: spacing.xxl,
   },
   placeholderTitle: {
-    color: '#E2E8F0',
+    color: colors.text,
     fontSize: 20,
     fontWeight: '700',
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
   },
   placeholderHint: {
-    color: '#94A3B8',
+    color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 21,
     textAlign: 'center',
@@ -687,7 +699,7 @@ const styles = StyleSheet.create({
   resultBlock: {
     flex: 1,
     overflow: 'hidden',
-    backgroundColor: '#000000',
+    backgroundColor: colors.bgSoft,
   },
   resultImage: {
     width: '100%',
@@ -697,111 +709,113 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.xl,
   },
   consentBody: {
-    paddingHorizontal: 24,
-    paddingBottom: 24,
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xl,
   },
   consentTitle: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 26,
     fontWeight: '800',
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   consentLead: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 17,
     fontWeight: '700',
     lineHeight: 25,
     marginBottom: 18,
   },
   consentItem: {
-    color: '#CBD5E1',
+    color: colors.textSecondary,
     fontSize: 15,
     lineHeight: 23,
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   consentLink: {
-    color: '#F8FAFC',
+    color: colors.accentDark,
     fontSize: 15,
     fontWeight: '700',
     textDecorationLine: 'underline',
-    marginTop: 8,
+    marginTop: spacing.sm,
   },
   loadingOrb: {
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: 'rgba(248, 250, 252, 0.08)',
+    backgroundColor: colors.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
   },
   spinner: {
-    marginBottom: 16,
+    marginBottom: spacing.lg,
   },
   loadingText: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 18,
     fontWeight: '700',
     textAlign: 'center',
     lineHeight: 26,
-    paddingHorizontal: 8,
+    paddingHorizontal: spacing.sm,
   },
   hint: {
-    color: '#94A3B8',
-    marginTop: 8,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
     fontSize: 14,
   },
   errorTitle: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 22,
     fontWeight: '800',
-    marginBottom: 10,
+    marginBottom: spacing.md,
     textAlign: 'center',
   },
   errorMessage: {
-    color: '#CBD5E1',
+    color: colors.textSecondary,
     fontSize: 15,
     lineHeight: 22,
     textAlign: 'center',
   },
   footer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: spacing.xl,
     paddingTop: 18,
   },
   footerRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: spacing.md,
   },
   primaryButton: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
-    borderRadius: 16,
+    backgroundColor: colors.accent,
+    borderRadius: radius.button,
     minHeight: 54,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.lg,
   },
   primaryButtonText: {
-    color: '#0F172A',
+    color: colors.inverseText,
     fontSize: 16,
     fontWeight: '800',
   },
   secondaryButton: {
     flex: 1,
-    borderRadius: 16,
+    borderRadius: radius.button,
     minHeight: 54,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    gap: 8,
-    backgroundColor: 'rgba(248, 250, 252, 0.08)',
-    paddingHorizontal: 16,
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.lg,
   },
   secondaryButtonText: {
-    color: '#F8FAFC',
+    color: colors.text,
     fontSize: 15,
     fontWeight: '700',
   },

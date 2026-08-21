@@ -49,8 +49,46 @@ export const GARMENT_CATEGORY_LABEL: Record<GarmentCategory, string> = {
   dresses: 'Elbise',
 };
 
-export const getDisplayPrice = (product: Product): number =>
-  product.currentPrice ?? product.price;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const isGarmentCategory = (value: unknown): value is GarmentCategory =>
+  value === 'upper_body' || value === 'lower_body' || value === 'dresses';
+
+const isOptionalFiniteNumber = (value: unknown): boolean =>
+  value === undefined ||
+  value === null ||
+  (typeof value === 'number' && Number.isFinite(value));
+
+export const isProductSnapshot = (value: unknown): value is Product => {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const price = value.price;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.imageUrl === 'string' &&
+    typeof value.title === 'string' &&
+    typeof price === 'number' &&
+    Number.isFinite(price) &&
+    typeof value.brand === 'string' &&
+    isGarmentCategory(value.category) &&
+    typeof value.garmentDescription === 'string' &&
+    isOptionalFiniteNumber(value.currentPrice) &&
+    isOptionalFiniteNumber(value.previousPrice)
+  );
+};
+
+export const getDisplayPrice = (product: Product): number => {
+  if (
+    typeof product.currentPrice === 'number' &&
+    Number.isFinite(product.currentPrice)
+  ) {
+    return product.currentPrice;
+  }
+  return product.price;
+};
 
 export const hasCatalogPriceDrop = (product: Product): boolean => {
   const livePrice = getDisplayPrice(product);

@@ -69,7 +69,9 @@ const sanitizeValue = (value: unknown, depth: number): unknown => {
   return truncate(String(value));
 };
 
-const sanitizeContext = (context: LogContext | undefined): LogContext | null => {
+export const sanitizeLogContext = (
+  context: LogContext | undefined,
+): LogContext | null => {
   if (!context) {
     return null;
   }
@@ -97,9 +99,14 @@ const emit = (
     return;
   }
 
-  const payload = sanitizeContext(context);
+  const payload = sanitizeLogContext(context);
 
   if (level === 'error') {
+    if (!__DEV__) {
+      void import('./sentry').then((sentry) => {
+        sentry.captureLoggedError(message, payload);
+      });
+    }
     if (payload) {
       console.error(message, payload);
       return;

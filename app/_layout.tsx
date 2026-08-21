@@ -4,9 +4,11 @@ import Constants from 'expo-constants';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import AppErrorBoundary from '../components/AppErrorBoundary';
 import { AuthProvider, useAuthContext } from '../hooks/useAuthContext';
 import { logger } from '../lib/logger';
 import { STACK_TRANSITION_MS } from '../lib/motion';
+import { colors, spacing } from '../lib/theme';
 import { useAppStore } from '../store/useAppStore';
 
 const registerPushIfSupported = async (userId: string): Promise<void> => {
@@ -43,7 +45,7 @@ function RootNavigator() {
   if (loading) {
     return (
       <View style={styles.boot}>
-        <ActivityIndicator color="#0F172A" size="large" />
+        <ActivityIndicator color={colors.accent} size="large" />
         <Text style={styles.bootText}>Kabin açılıyor...</Text>
       </View>
     );
@@ -71,10 +73,12 @@ function RootNavigator() {
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
-      <AuthProvider>
-        <RootNavigator />
-      </AuthProvider>
-      <StatusBar style="dark" />
+      <AppErrorBoundary>
+        <AuthProvider>
+          <RootNavigator />
+        </AuthProvider>
+        <StatusBar style="dark" />
+      </AppErrorBoundary>
     </GestureHandlerRootView>
   );
 }
@@ -82,21 +86,21 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.bg,
   },
   stackContent: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.bg,
   },
   boot: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.bg,
   },
   bootText: {
-    marginTop: 14,
+    marginTop: spacing.lg,
     fontSize: 16,
     fontWeight: '700',
-    color: '#64748B',
+    color: colors.textSecondary,
   },
 });

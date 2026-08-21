@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useAuthContext } from '../hooks/useAuthContext';
 import { logger } from '../lib/logger';
+import { colors, radius, shadows, spacing } from '../lib/theme';
 import type { AuthStatus } from '../types/auth';
 
 type AuthMode = 'login' | 'signup';
@@ -107,10 +108,11 @@ export default function AuthScreen() {
           value={email}
           onChangeText={setEmail}
           placeholder="E-posta"
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor={colors.textSecondary}
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="email-address"
+          keyboardAppearance="light"
           textContentType="emailAddress"
           style={styles.input}
           editable={!isLoading}
@@ -119,8 +121,9 @@ export default function AuthScreen() {
           value={password}
           onChangeText={setPassword}
           placeholder="Şifre"
-          placeholderTextColor="#94A3B8"
+          placeholderTextColor={colors.textSecondary}
           secureTextEntry
+          keyboardAppearance="light"
           textContentType={mode === 'login' ? 'password' : 'newPassword'}
           style={styles.input}
           editable={!isLoading}
@@ -145,7 +148,7 @@ export default function AuthScreen() {
           accessibilityLabel={submitLabel}
         >
           {isLoading ? (
-            <ActivityIndicator color="#F8FAFC" />
+            <ActivityIndicator color={colors.inverseText} />
           ) : (
             <Text style={styles.submitText}>{submitLabel}</Text>
           )}
@@ -170,81 +173,79 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.bgSoft,
     justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: spacing.xl,
   },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    padding: 24,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    elevation: 6,
+    backgroundColor: colors.surface,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    padding: spacing.xl,
+    ...shadows.card,
   },
   brand: {
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: 0.8,
-    color: '#0F172A',
-    marginBottom: 12,
+    color: colors.accent,
+    marginBottom: spacing.md,
   },
   title: {
     fontSize: 26,
     fontWeight: '800',
-    color: '#0F172A',
-    marginBottom: 8,
+    color: colors.text,
+    marginBottom: spacing.sm,
   },
   subtitle: {
     fontSize: 15,
     lineHeight: 22,
-    color: '#64748B',
-    marginBottom: 22,
+    color: colors.textSecondary,
+    marginBottom: spacing.xl,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    borderColor: colors.border,
+    borderRadius: radius.button,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.lg,
     fontSize: 16,
-    color: '#0F172A',
-    marginBottom: 12,
-    backgroundColor: '#F8FAFC',
+    color: colors.text,
+    marginBottom: spacing.md,
+    backgroundColor: colors.bgSoft,
   },
   error: {
-    color: '#DC2626',
+    color: colors.destructive,
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   info: {
-    color: '#0F172A',
+    color: colors.accentDark,
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   submit: {
-    backgroundColor: '#0F172A',
-    borderRadius: 14,
-    paddingVertical: 16,
+    backgroundColor: colors.accent,
+    borderRadius: radius.button,
+    paddingVertical: spacing.lg,
     alignItems: 'center',
-    marginTop: 4,
+    marginTop: spacing.xs,
   },
   submitPressed: {
     opacity: 0.82,
   },
   submitText: {
-    color: '#F8FAFC',
+    color: colors.inverseText,
     fontSize: 16,
     fontWeight: '800',
   },
   toggle: {
     marginTop: 18,
     textAlign: 'center',
-    color: '#475569',
+    color: colors.textSecondary,
     fontSize: 14,
     fontWeight: '600',
   },

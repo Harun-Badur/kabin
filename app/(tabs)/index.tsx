@@ -13,9 +13,19 @@ import SwipeCard, {
 } from '../../components/SwipeCard';
 import PressableScale from '../../components/PressableScale';
 import SkeletonShimmer from '../../components/SkeletonShimmer';
+import SwipeHintOverlay from '../../components/SwipeHintOverlay';
 import VirtualTryOnModal from '../../components/VirtualTryOnModal';
 import { useAuthContext } from '../../hooks/useAuthContext';
 import { logger } from '../../lib/logger';
+import {
+  DECK_OPACITY_BY_DEPTH,
+  DECK_SCALE_BY_DEPTH,
+  DECK_SPRING,
+  DECK_TRANSLATE_Y_BY_DEPTH,
+  DECK_VISIBLE_COUNT,
+} from '../../lib/motion';
+import { hasSeenSwipeHint, markSwipeHintSeen } from '../../lib/onboarding';
+import { colors, radius, shadows, spacing } from '../../lib/theme';
 import {
   getRedirectLabel,
   openProductPage,
@@ -23,11 +33,13 @@ import {
 import { useAppStore } from '../../store/useAppStore';
 import type { Product } from '../../types/product';
 
-const VISIBLE_STACK_SIZE = 3;
-const STACK_SCALE_STEP = 0.05;
-const STACK_TRANSLATE_Y_STEP = 14;
-const STACK_SPRING = { damping: 16, stiffness: 160 } as const;
 const TOAST_DURATION_MS = 1600;
+
+type HintStatus = 'checking' | 'visible' | 'hidden';
+
+/** Derinlik dizilerinin son basamağı, taşan kartlar için tavan değeri verir. */
+const atDepth = (steps: readonly number[], depth: number): number =>
+  steps[Math.min(depth, steps.length - 1)] ?? steps[steps.length - 1] ?? 1;
 
 interface StackSlotProps {
   product: Product;
@@ -47,7 +59,7 @@ function LoadingFeed() {
       <SkeletonShimmer
         width={SWIPE_CARD_WIDTH}
         height={SWIPE_CARD_HEIGHT}
-        borderRadius={24}
+        borderRadius={radius.card}
       />
       <Text style={styles.loadingTitle}>Ürünler yükleniyor...</Text>
       <Text style={styles.emptySubtitle}>
@@ -57,38 +69,36 @@ function LoadingFeed() {
   );
 }
 
-function EmptyFeed() {
-  return (
-    <View style={styles.emptyState}>
-      <Text style={styles.emptyEmoji}>🎉</Text>
-      <Text style={styles.emptyTitle}>Şimdilik bu kadar!</Text>
-      <Text style={styles.emptySubtitle}>
-        Beğendiğin parçalar dolabına eklendi. Yeni öneriler yakında.
-      </Text>
-    </View>
-  );
-}
-
-interface ExhaustedFeedProps {
+interface DeckFinishedCardProps {
+  subtitle: string;
   onRefresh: () => void;
+  onOpenLiked: () => void;
 }
 
-function ExhaustedFeed({ onRefresh }: ExhaustedFeedProps) {
+function DeckFinishedCard({
+  subtitle,
+  onRefresh,
+  onOpenLiked,
+}: DeckFinishedCardProps) {
   return (
-    <View style={styles.emptyState}>
-      <Text style={styles.emptyEmoji}>👀</Text>
-      <Text style={styles.emptyTitle}>Katalogdaki her şeyi gördün</Text>
-      <Text style={styles.emptySubtitle}>
-        Yeni ürünler eklendikçe haberdar ol: beğendiğin parçalarda fiyat alarmını
-        açık bırak, dolabına yeni öneriler düştüğünde bildirim gönderiyoruz.
-      </Text>
+    <View style={styles.finishedCard}>
+      <Text style={styles.finishedTitle}>Deste bitti! 🎉</Text>
+      <Text style={styles.emptySubtitle}>{subtitle}</Text>
+      <PressableScale
+        onPress={onOpenLiked}
+        style={styles.primaryCta}
+        accessibilityRole="button"
+        accessibilityLabel="Beğenilenleri gör"
+      >
+        <Text style={styles.primaryCtaText}>Beğenilenleri Gör</Text>
+      </PressableScale>
       <PressableScale
         onPress={onRefresh}
-        style={styles.refreshButton}
+        style={styles.secondaryCta}
         accessibilityRole="button"
-        accessibilityLabel="Yeni ürünleri kontrol et"
+        accessibilityLabel="Yenile"
       >
-        <Text style={styles.refreshButtonText}>Yeni ürünleri kontrol et</Text>
+        <Text style={styles.secondaryCtaText}>Yenile</Text>
       </PressableScale>
     </View>
   );
@@ -105,23 +115,24 @@ function StackSlot({
   onBuy,
   onRequireAuth,
 }: StackSlotProps) {
-  const scale = useSharedValue(isTop ? 1 : 1 - depth * STACK_SCALE_STEP);
-  const translateY = useSharedValue(
-    isTop ? 0 : depth * STACK_TRANSLATE_Y_STEP,
-  );
+  const scale = useSharedValue(atDepth(DECK_SCALE_BY_DEPTH, depth));
+  const translateY = useSharedValue(atDepth(DECK_TRANSLATE_Y_BY_DEPTH, depth));
+  const opacity = useSharedValue(atDepth(DECK_OPACITY_BY_DEPTH, depth));
 
   useEffect(() => {
-    scale.value = withSpring(
-      isTop ? 1 : 1 - depth * STACK_SCALE_STEP,
-      STACK_SPRING,
-    );
+    scale.value = withSpring(atDepth(DECK_SCALE_BY_DEPTH, depth), DECK_SPRING);
     translateY.value = withSpring(
-      isTop ? 0 : depth * STACK_TRANSLATE_Y_STEP,
-      STACK_SPRING,
+      atDepth(DECK_TRANSLATE_Y_BY_DEPTH, depth),
+      DECK_SPRING,
     );
-  }, [depth, isTop, scale, translateY]);
+    opacity.value = withSpring(
+      atDepth(DECK_OPACITY_BY_DEPTH, depth),
+      DECK_SPRING,
+    );
+  }, [depth, opacity, scale, translateY]);
 
   const animatedSlotStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
     transform: [{ translateY: translateY.value }, { scale: scale.value }],
   }));
 
@@ -130,7 +141,7 @@ function StackSlot({
       pointerEvents={isTop ? 'auto' : 'none'}
       style={[
         styles.stackSlot,
-        { zIndex: VISIBLE_STACK_SIZE - depth },
+        { zIndex: DECK_VISIBLE_COUNT - depth },
         animatedSlotStyle,
       ]}
     >
@@ -176,6 +187,10 @@ export default function FeedScreen() {
     router.push('/profile');
   }, [router]);
 
+  const handleOpenLiked = useCallback((): void => {
+    router.push('/liked');
+  }, [router]);
+
   const handleSwipeRight = useCallback(
     (product: Product): void => {
       if (!canLike) {
@@ -204,7 +219,26 @@ export default function FeedScreen() {
 
   const [tryOnProduct, setTryOnProduct] = useState<Product | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [hintStatus, setHintStatus] = useState<HintStatus>('checking');
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    void hasSeenSwipeHint().then((seen) => {
+      if (isMounted) {
+        setHintStatus(seen ? 'hidden' : 'visible');
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleDismissHint = useCallback((): void => {
+    setHintStatus('hidden');
+    void markSwipeHintSeen();
+  }, []);
 
   const showToast = useCallback((message: string): void => {
     if (toastTimeoutRef.current !== null) {
@@ -245,7 +279,7 @@ export default function FeedScreen() {
   const visibleSlots = useMemo(
     () =>
       currentProducts
-        .slice(0, VISIBLE_STACK_SIZE)
+        .slice(0, DECK_VISIBLE_COUNT)
         .map((product, depth) => ({ product, depth }))
         .reverse(),
     [currentProducts],
@@ -254,22 +288,31 @@ export default function FeedScreen() {
   // Katalogda ürün var ama hepsi beğenildi/geçildi: tekrar yüklemek işe yaramaz,
   // kullanıcıya yeni ürünlerden haberdar olma yolunu göster.
   const isCatalogExhausted = visibleSlots.length === 0 && seenCount > 0;
+  const isLoading = feedStatus === 'loading' || feedStatus === 'idle';
 
   return (
     <View style={styles.container}>
       <Text style={styles.header}>Kabin</Text>
       {feedIsPersonalized && visibleSlots.length > 0 ? (
         <View style={styles.personalizedBadge} pointerEvents="none">
-          <Sparkles color="#0F172A" size={12} />
+          <Sparkles color={colors.accentDark} size={12} />
           <Text style={styles.personalizedBadgeText}>Sana özel sıralandı</Text>
         </View>
       ) : null}
-      {feedStatus === 'loading' || feedStatus === 'idle' ? (
+      {isLoading ? (
         <LoadingFeed />
       ) : isCatalogExhausted ? (
-        <ExhaustedFeed onRefresh={reloadFeed} />
+        <DeckFinishedCard
+          subtitle="Katalogdaki her şeyi gördün. Yeni ürünler eklendikçe burada belirir."
+          onRefresh={reloadFeed}
+          onOpenLiked={handleOpenLiked}
+        />
       ) : visibleSlots.length === 0 ? (
-        <EmptyFeed />
+        <DeckFinishedCard
+          subtitle="Beğendiğin parçalar dolabına eklendi. Yeni öneriler yakında."
+          onRefresh={reloadFeed}
+          onOpenLiked={handleOpenLiked}
+        />
       ) : (
         <View style={styles.deck}>
           {visibleSlots.map(({ product, depth }) => (
@@ -288,6 +331,9 @@ export default function FeedScreen() {
           ))}
         </View>
       )}
+      {hintStatus === 'visible' && !isLoading && visibleSlots.length > 0 ? (
+        <SwipeHintOverlay onDismiss={handleDismissHint} />
+      ) : null}
       <VirtualTryOnModal
         visible={tryOnProduct !== null}
         product={tryOnProduct}
@@ -305,7 +351,7 @@ export default function FeedScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.bgSoft,
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: 28,
@@ -316,22 +362,22 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '800',
     letterSpacing: 0.6,
-    color: '#0F172A',
+    color: colors.text,
   },
   personalizedBadge: {
     position: 'absolute',
     top: 62,
-    right: 16,
+    right: spacing.lg,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    backgroundColor: '#E2E8F0',
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    gap: spacing.xs,
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.chip,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
   },
   personalizedBadgeText: {
-    color: '#0F172A',
+    color: colors.accentDark,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -346,58 +392,81 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    paddingHorizontal: 36,
+    paddingHorizontal: spacing.xxl,
   },
-  emptyEmoji: {
-    fontSize: 56,
-    marginBottom: 16,
+  finishedCard: {
+    width: SWIPE_CARD_WIDTH,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.xxl,
+    ...shadows.card,
   },
-  emptyTitle: {
+  finishedTitle: {
     fontSize: 26,
     fontWeight: '800',
-    color: '#0F172A',
+    color: colors.text,
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: spacing.md,
   },
   loadingTitle: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#0F172A',
+    color: colors.text,
     textAlign: 'center',
-    marginTop: 16,
-    marginBottom: 10,
+    marginTop: spacing.lg,
+    marginBottom: spacing.md,
   },
   emptySubtitle: {
     fontSize: 16,
     lineHeight: 24,
-    color: '#64748B',
+    color: colors.textSecondary,
     textAlign: 'center',
   },
-  refreshButton: {
-    marginTop: 22,
-    backgroundColor: '#0F172A',
-    borderRadius: 14,
-    paddingHorizontal: 22,
-    paddingVertical: 14,
+  primaryCta: {
+    alignSelf: 'stretch',
+    marginTop: spacing.xl,
+    backgroundColor: colors.accent,
+    borderRadius: radius.button,
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
   },
-  refreshButtonText: {
-    color: '#F8FAFC',
+  primaryCtaText: {
+    color: colors.inverseText,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  secondaryCta: {
+    alignSelf: 'stretch',
+    marginTop: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.button,
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
+  },
+  secondaryCtaText: {
+    color: colors.text,
     fontSize: 15,
     fontWeight: '700',
   },
   toast: {
     position: 'absolute',
-    left: 24,
-    right: 24,
-    bottom: 24,
-    backgroundColor: 'rgba(15, 23, 42, 0.92)',
-    borderRadius: 16,
-    paddingHorizontal: 18,
-    paddingVertical: 14,
+    left: spacing.xl,
+    right: spacing.xl,
+    bottom: spacing.xl,
+    zIndex: 10,
+    backgroundColor: colors.inverseSurface,
+    borderRadius: radius.button,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.lg,
     alignItems: 'center',
   },
   toastText: {
-    color: '#F8FAFC',
+    color: colors.inverseText,
     fontSize: 15,
     fontWeight: '700',
     textAlign: 'center',

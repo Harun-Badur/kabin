@@ -10,6 +10,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { SHIMMER_DURATION_MS } from '../lib/motion';
+import { colors, gradients, radius } from '../lib/theme';
 
 interface SkeletonShimmerProps {
   width: number;
@@ -23,7 +24,7 @@ const SHIMMER_WIDTH_RATIO = 0.42;
 export default function SkeletonShimmer({
   width,
   height,
-  borderRadius = 16,
+  borderRadius = radius.button,
   style,
 }: SkeletonShimmerProps) {
   const travel = width + width * SHIMMER_WIDTH_RATIO;
@@ -67,11 +68,7 @@ export default function SkeletonShimmer({
         ]}
       >
         <LinearGradient
-          colors={[
-            'rgba(248, 250, 252, 0)',
-            'rgba(248, 250, 252, 0.72)',
-            'rgba(248, 250, 252, 0)',
-          ]}
+          colors={gradients.shimmer}
           start={{ x: 0, y: 0.5 }}
           end={{ x: 1, y: 0.5 }}
           style={StyleSheet.absoluteFill}
@@ -84,7 +81,7 @@ export default function SkeletonShimmer({
 const styles = StyleSheet.create({
   base: {
     overflow: 'hidden',
-    backgroundColor: '#E2E8F0',
+    backgroundColor: colors.hairline,
   },
   shimmer: {
     position: 'absolute',

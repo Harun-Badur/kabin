@@ -16,6 +16,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Heart, ShoppingBag, Sparkles, X } from 'lucide-react-native';
 import PressableScale from './PressableScale';
+import { hapticPurchaseIntent, hapticSwipeDecision } from '../lib/haptics';
 import { logger } from '../lib/logger';
 import {
   CARD_EXIT_DURATION_MS,
@@ -26,6 +27,7 @@ import {
   PRESS_DURATION_MS,
   PRESS_SCALE,
 } from '../lib/motion';
+import { colors, radius, shadows, spacing } from '../lib/theme';
 import {
   formatTryPrice,
   GARMENT_CATEGORY_LABEL,
@@ -42,6 +44,13 @@ const EXIT_DISTANCE_PX = SCREEN_WIDTH * 1.35;
 const EXIT_UP_DISTANCE_PX = SCREEN_HEIGHT * 1.15;
 const PAN_MIN_DISTANCE_PX = 18;
 const EXIT_TIMING = { duration: CARD_EXIT_DURATION_MS } as const;
+const ACTION_ICON_SIZE = 16;
+/** Fashion kadrajı: genişlik/yükseklik 3/4. */
+const IMAGE_ASPECT_RATIO = 3 / 4;
+/** CSS object-position: 50% 20% — kafa/omuz kadrajını korur. */
+const IMAGE_CONTENT_POSITION = { left: '50%', top: '20%' } as const;
+const CARD_INFO_BAND_HEIGHT = 212;
+const MAX_CARD_HEIGHT_RATIO = 0.78;
 
 export type { Product };
 
@@ -154,6 +163,7 @@ export default function SwipeCard({
       buyScale.value = withTiming(1, { duration: PRESS_DURATION_MS });
     })
     .onEnd(() => {
+      runOnJS(hapticPurchaseIntent)();
       runOnJS(handleBuy)();
     });
 
@@ -200,6 +210,7 @@ export default function SwipeCard({
       }
 
       if (event.translationY < -SWIPE_UP_THRESHOLD_PX) {
+        runOnJS(hapticPurchaseIntent)();
         flyOut(event.translationX, -EXIT_UP_DISTANCE_PX, finishBuyExit);
         return;
       }
@@ -210,6 +221,7 @@ export default function SwipeCard({
           runOnJS(handleRequireAuth)();
           return;
         }
+        runOnJS(hapticSwipeDecision)();
         flyOut(
           EXIT_DISTANCE_PX,
           event.translationY - CARD_EXIT_LIFT_PX,
@@ -219,6 +231,7 @@ export default function SwipeCard({
       }
 
       if (event.translationX < -SWIPE_THRESHOLD_PX) {
+        runOnJS(hapticSwipeDecision)();
         flyOut(
           -EXIT_DISTANCE_PX,
           event.translationY - CARD_EXIT_LIFT_PX,
@@ -268,7 +281,7 @@ export default function SwipeCard({
     ],
   }));
 
-  const nopeOverlayStyle = useAnimatedStyle(() => ({
+  const passOverlayStyle = useAnimatedStyle(() => ({
     opacity: interpolate(
       translateX.value,
       [0, -SWIPE_THRESHOLD_PX],
@@ -296,7 +309,7 @@ export default function SwipeCard({
     ),
   }));
 
-  const nopeWashStyle = useAnimatedStyle(() => ({
+  const passWashStyle = useAnimatedStyle(() => ({
     opacity: interpolate(
       translateX.value,
       [0, -SWIPE_THRESHOLD_PX],
@@ -326,94 +339,73 @@ export default function SwipeCard({
         accessibilityLabel={`${product.brand} ${product.title}, ${formatPrice(product)}`}
       >
         <View style={styles.card}>
-          {hasImageError ? (
-            <View style={styles.imageFallback}>
-              <Text style={styles.imageFallbackText}>Görsel yüklenemedi</Text>
-            </View>
-          ) : (
-            <Image
-              source={{ uri: product.imageUrl }}
-              style={styles.image}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              recyclingKey={product.id}
-              transition={160}
-              onError={() => setHasImageError(true)}
+          <View style={styles.imageWrap}>
+            {hasImageError ? (
+              <View style={styles.imageFallback}>
+                <Text style={styles.imageFallbackText}>Görsel yüklenemedi</Text>
+              </View>
+            ) : (
+              <Image
+                source={{ uri: product.imageUrl }}
+                style={styles.image}
+                contentFit="cover"
+                contentPosition={IMAGE_CONTENT_POSITION}
+                cachePolicy="memory-disk"
+                recyclingKey={product.id}
+                transition={160}
+                onError={() => setHasImageError(true)}
+              />
+            )}
+
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.wash, styles.likeWash, likeWashStyle]}
             />
-          )}
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.wash, styles.passWash, passWashStyle]}
+            />
 
-          <View style={styles.gradientScrim} />
-
-          <Animated.View
-            pointerEvents="none"
-            style={[styles.wash, styles.likeWash, likeWashStyle]}
-          />
-          <Animated.View
-            pointerEvents="none"
-            style={[styles.wash, styles.nopeWash, nopeWashStyle]}
-          />
-
-          <Animated.View
-            pointerEvents="none"
-            style={[styles.stamp, styles.likeStamp, likeOverlayStyle]}
-          >
-            <Heart color="#16A34A" fill="#16A34A" size={28} />
-            <Text style={styles.likeStampText}>BEĞEN</Text>
-          </Animated.View>
-
-          <Animated.View
-            pointerEvents="none"
-            style={[styles.stamp, styles.nopeStamp, nopeOverlayStyle]}
-          >
-            <X color="#DC2626" size={28} strokeWidth={3} />
-            <Text style={styles.nopeStampText}>GEÇ</Text>
-          </Animated.View>
-
-          <Animated.View
-            pointerEvents="none"
-            style={[styles.stamp, styles.buyStamp, buyOverlayStyle]}
-          >
-            <ShoppingBag color="#0F172A" size={26} />
-            <Text style={styles.buyStampText}>SATIN AL</Text>
-          </Animated.View>
-
-          {isInteractive && !canLike ? (
-            <PressableScale
-              onPress={handleRequireAuth}
-              style={styles.authButton}
-              accessibilityRole="button"
-              accessibilityLabel="Beğenmek için giriş yap"
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.stamp, styles.likeStamp, likeOverlayStyle]}
             >
-              <Heart color="#0F172A" size={16} />
-              <Text style={styles.authButtonText}>Beğenmek için giriş yap</Text>
-            </PressableScale>
-          ) : null}
+              <Heart color={colors.accent} fill={colors.accent} size={28} />
+              <Text style={styles.likeStampText}>BEĞEN</Text>
+            </Animated.View>
 
-          {isInteractive ? (
-            <GestureDetector gesture={buyTapGesture}>
-              <Animated.View
-                style={[styles.buyButton, buyButtonStyle]}
-                accessibilityRole="button"
-                accessibilityLabel="Satın al"
-              >
-                <ShoppingBag color="#0F172A" size={18} />
-                <Text style={styles.buyButtonText}>Satın Al</Text>
-              </Animated.View>
-            </GestureDetector>
-          ) : null}
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.stamp, styles.passStamp, passOverlayStyle]}
+            >
+              <X color={colors.textSecondary} size={28} strokeWidth={3} />
+              <Text style={styles.passStampText}>GEÇ</Text>
+            </Animated.View>
 
-          <View style={styles.info}>
-            {isInteractive ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.stamp, styles.buyStamp, buyOverlayStyle]}
+            >
+              <ShoppingBag color={colors.text} size={26} />
+              <Text style={styles.buyStampText}>SATIN AL</Text>
+            </Animated.View>
+
+            {isInteractive && !canLike ? (
               <PressableScale
-                onPress={handleVirtualTryOn}
-                style={styles.tryOnButton}
+                onPress={handleRequireAuth}
+                style={styles.authButton}
                 accessibilityRole="button"
-                accessibilityLabel="Sanal dene"
+                accessibilityLabel="Beğenmek için giriş yap"
               >
-                <Sparkles color="#0F172A" size={16} />
-                <Text style={styles.tryOnButtonText}>✨ Sanal Dene</Text>
+                <Heart color={colors.accent} size={ACTION_ICON_SIZE} />
+                <Text style={styles.authButtonText}>
+                  Beğenmek için giriş yap
+                </Text>
               </PressableScale>
             ) : null}
+          </View>
+
+          <View style={styles.info}>
             <View style={styles.categoryBadge}>
               <Text style={styles.categoryBadgeText}>
                 {GARMENT_CATEGORY_LABEL[product.category]}
@@ -434,6 +426,30 @@ export default function SwipeCard({
               ) : null}
               <Text style={styles.price}>{formatPrice(product)}</Text>
             </View>
+
+            {isInteractive ? (
+              <View style={styles.actions}>
+                <PressableScale
+                  onPress={handleVirtualTryOn}
+                  style={styles.primaryAction}
+                  accessibilityRole="button"
+                  accessibilityLabel="Dene"
+                >
+                  <Sparkles color={colors.inverseText} size={ACTION_ICON_SIZE} />
+                  <Text style={styles.primaryActionText}>Dene</Text>
+                </PressableScale>
+                <GestureDetector gesture={buyTapGesture}>
+                  <Animated.View
+                    style={[styles.secondaryAction, buyButtonStyle]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Mağazaya git"
+                  >
+                    <ShoppingBag color={colors.text} size={ACTION_ICON_SIZE} />
+                    <Text style={styles.secondaryActionText}>Mağazaya Git</Text>
+                  </Animated.View>
+                </GestureDetector>
+              </View>
+            ) : null}
           </View>
         </View>
       </Animated.View>
@@ -442,7 +458,12 @@ export default function SwipeCard({
 }
 
 const CARD_WIDTH = SCREEN_WIDTH * 0.88;
-const CARD_HEIGHT = Math.min(SCREEN_HEIGHT * 0.68, CARD_WIDTH * 1.42);
+const PREFERRED_IMAGE_HEIGHT = CARD_WIDTH / IMAGE_ASPECT_RATIO;
+const IMAGE_HEIGHT = Math.min(
+  PREFERRED_IMAGE_HEIGHT,
+  SCREEN_HEIGHT * MAX_CARD_HEIGHT_RATIO - CARD_INFO_BAND_HEIGHT,
+);
+const CARD_HEIGHT = IMAGE_HEIGHT + CARD_INFO_BAND_HEIGHT;
 
 export const SWIPE_CARD_WIDTH = CARD_WIDTH;
 export const SWIPE_CARD_HEIGHT = CARD_HEIGHT;
@@ -451,19 +472,22 @@ const styles = StyleSheet.create({
   shadowWrap: {
     width: CARD_WIDTH,
     height: CARD_HEIGHT,
-    borderRadius: 24,
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.18,
-    shadowRadius: 24,
-    elevation: 12,
+    borderRadius: radius.card,
+    backgroundColor: colors.surface,
+    ...shadows.card,
   },
   card: {
     flex: 1,
-    borderRadius: 24,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
     overflow: 'hidden',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
+  },
+  imageWrap: {
+    width: '100%',
+    height: IMAGE_HEIGHT,
+    backgroundColor: colors.bgSoft,
   },
   image: {
     width: '100%',
@@ -473,50 +497,42 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F1F5F9',
+    backgroundColor: colors.bgSoft,
   },
   imageFallbackText: {
-    color: '#64748B',
+    color: colors.textSecondary,
     fontSize: 15,
     fontWeight: '600',
-  },
-  gradientScrim: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '38%',
-    backgroundColor: 'rgba(15, 23, 42, 0.55)',
   },
   wash: {
     ...StyleSheet.absoluteFillObject,
   },
   likeWash: {
-    backgroundColor: 'rgba(22, 163, 74, 0.28)',
+    backgroundColor: colors.likeWash,
   },
-  nopeWash: {
-    backgroundColor: 'rgba(220, 38, 38, 0.28)',
+  passWash: {
+    backgroundColor: colors.passWash,
   },
   stamp: {
     position: 'absolute',
     top: 28,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.button,
     borderWidth: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    backgroundColor: colors.glass,
   },
   likeStamp: {
-    left: 20,
-    borderColor: '#16A34A',
+    left: spacing.xl,
+    borderColor: colors.accent,
     transform: [{ rotate: '-12deg' }],
   },
-  nopeStamp: {
-    right: 20,
-    borderColor: '#DC2626',
+  passStamp: {
+    right: spacing.xl,
+    borderColor: colors.textSecondary,
     transform: [{ rotate: '12deg' }],
   },
   buyStamp: {
@@ -524,138 +540,138 @@ const styles = StyleSheet.create({
     left: 72,
     right: 72,
     justifyContent: 'center',
-    borderColor: '#0F172A',
+    borderColor: colors.text,
   },
   likeStampText: {
-    color: '#16A34A',
+    color: colors.accent,
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: 1.2,
   },
-  nopeStampText: {
-    color: '#DC2626',
+  passStampText: {
+    color: colors.textSecondary,
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: 1.2,
   },
   buyStampText: {
-    color: '#0F172A',
+    color: colors.text,
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: 1.2,
   },
-  buyButton: {
-    position: 'absolute',
-    right: 16,
-    bottom: 22,
-    zIndex: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(248, 250, 252, 0.96)',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 999,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.16,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  buyButtonText: {
-    color: '#0F172A',
-    fontSize: 14,
-    fontWeight: '800',
-  },
   authButton: {
     position: 'absolute',
-    left: 16,
-    top: 18,
+    left: spacing.md,
+    top: spacing.md,
     zIndex: 4,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(248, 250, 252, 0.96)',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
+    gap: spacing.sm,
+    backgroundColor: colors.glass,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.chip,
+    ...shadows.chip,
   },
   authButtonText: {
-    color: '#0F172A',
+    color: colors.text,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   info: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 20,
-    paddingBottom: 22,
-    paddingTop: 12,
-  },
-  tryOnButton: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.94)',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
-    marginBottom: 14,
-  },
-  tryOnButtonText: {
-    color: '#0F172A',
-    fontSize: 14,
-    fontWeight: '700',
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.hairline,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
   },
   categoryBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(248, 250, 252, 0.18)',
+    backgroundColor: colors.bgSoft,
     borderWidth: 1,
-    borderColor: 'rgba(248, 250, 252, 0.28)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    marginBottom: 8,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radius.chip,
+    marginBottom: spacing.sm,
   },
   categoryBadgeText: {
-    color: '#F8FAFC',
-    fontSize: 11,
+    color: colors.textSecondary,
+    fontSize: 10,
     fontWeight: '700',
     letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
   brand: {
-    color: '#CBD5E1',
-    fontSize: 13,
+    color: colors.textSecondary,
+    fontSize: 12,
     fontWeight: '600',
-    letterSpacing: 1.4,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   title: {
-    color: '#FFFFFF',
-    fontSize: 24,
+    color: colors.text,
+    fontSize: 18,
     fontWeight: '700',
-    lineHeight: 30,
-    marginBottom: 8,
+    lineHeight: 24,
+    marginBottom: spacing.xs,
   },
   priceRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: spacing.sm,
   },
   previousPrice: {
-    color: '#94A3B8',
-    fontSize: 16,
+    color: colors.textSecondary,
+    fontSize: 14,
     fontWeight: '600',
     textDecorationLine: 'line-through',
   },
   price: {
-    color: '#FFFFFF',
+    color: colors.text,
     fontSize: 20,
-    fontWeight: '600',
+    fontWeight: '800',
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  primaryAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.accent,
+    borderRadius: radius.button,
+    paddingVertical: spacing.md,
+  },
+  primaryActionText: {
+    color: colors.inverseText,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  secondaryAction: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.button,
+    paddingVertical: spacing.md,
+  },
+  secondaryActionText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

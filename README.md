@@ -61,6 +61,7 @@ yollarda bu başlığı arar; eksik veya hatalıysa 401 döner.
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Uygulama | Anon / public key (RLS ile okuma) |
 | `EXPO_PUBLIC_VTON_PROXY_URL` | Uygulama | `vton-proxy` Edge Function adresi |
 | `EXPO_PUBLIC_AFFILIATE_TAGS_JSON` | Uygulama | Boş bırakılırsa URL’ye affiliate parametresi eklenmez |
+| `EXPO_PUBLIC_SENTRY_DSN` | Uygulama | Boşsa Sentry **hiç** `init` edilmez. DSN: [sentry.io](https://sentry.io) → Create project → **React Native** → **Client Keys (DSN)** |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yalnızca script | Feed import / seed. `EXPO_PUBLIC_` **olmaz** |
 | `AFFILIATE_TAGS_JSON` | Script | Seed tarafı etiketleri |
 | `KABIN_VTON_SECRET` | Edge Function + Modal | Proxy ↔ Modal paylaşılan sırrı. Uygulamaya **girmez** |
@@ -114,6 +115,15 @@ npx expo start
 ```
 
 Cache temizlemek için: `npx expo start -c`
+
+### Kalite (lint / test)
+
+```bash
+npm run lint
+npm test
+```
+
+Sentry DSN boşsa SDK `init` çağrılmaz; Expo Go bu yüzden etkilenmez. DSN almak için [sentry.io](https://sentry.io) üzerinde **React Native** projesi oluştur, **Settings → Client Keys (DSN)** değerini kopyala ve `EXPO_PUBLIC_SENTRY_DSN` olarak `.env` / EAS `env` bloğuna yaz. Native debug sembolleri için EAS’te ayrıca `SENTRY_ORG`, `SENTRY_PROJECT` ve `SENTRY_AUTH_TOKEN` tanımlanabilir; boş DSN ile bunlar gerekmez.
 
 ### Fiyat düşüşü testi (MVP, scraping yok)
 
@@ -175,8 +185,9 @@ doğrula; prebuild bunları `expo run:*` olarak değiştiriyor ve proje CNG
 
 ### İzinler
 
-Manifeste yalnızca `INTERNET`, `POST_NOTIFICATIONS` ve galeri okuma izinleri
-girer. `expo-image-picker` varsayılan olarak `CAMERA` ve `RECORD_AUDIO` da
+Manifeste yalnızca `INTERNET`, `POST_NOTIFICATIONS`, `VIBRATE` (kaydırma
+dokunsal geri bildirimi) ve galeri okuma izinleri girer.
+`expo-image-picker` varsayılan olarak `CAMERA` ve `RECORD_AUDIO` da
 ekliyor; ikisi de `android.blockedPermissions` ile kaldırılıyor çünkü uygulama
 kamera ya da mikrofon kullanmıyor. Bu listeyi genişletmeden önce Play Console
 "Veri güvenliği" formunun da güncellenmesi gerekir.
@@ -187,7 +198,41 @@ kamera ya da mikrofon kullanmıyor. Bu listeyi genişletmeden önce Play Console
 üretilmiş **placeholder**'lardır. Yayın öncesi tasarımcı çıktısıyla
 değiştirilmeli; boyutlar korunmalı (`icon.png` 1024×1024,
 `android-icon-foreground.png` 1024×1024 saydam, `notification-icon.png` 96×96
-beyaz silüet + saydam).
+beyaz silüet + saydam). Uygulama light temaya geçtiği hâlde splash ve simge
+zeminleri lacivert kaldı: mevcut silüetler beyaz olduğu için zemin beyaza
+çekilirse görünmez oluyor. Beyaz splash'e geçiş, mercan/antrasit logo çıktısıyla
+birlikte yapılmalı.
+
+## Tasarım sistemi
+
+Tema tek kaynaktan gelir: [`lib/theme.ts`](lib/theme.ts). Ekranlarda ham hex
+kullanılmaz. Palet "Beyaz Taban + Mercan Aksan" 60-30-10 dengesine dayanır:
+%60 beyaz/kırık beyaz zemin, %30 antrasit tipografi, %10 mercan aksan.
+
+| Token | Değer | Kullanım |
+|-------|-------|----------|
+| `colors.bg` / `bgSoft` | `#FFFFFF` / `#FAFAFA` | Kart zemini / ekran zemini |
+| `colors.text` / `textSecondary` | `#111827` / `#6B7280` | Başlık / yardımcı metin |
+| `colors.border` / `hairline` | `#E5E7EB` / `#F3F4F6` | Kart kenarı / ayırıcı |
+| `colors.accent` | `#FE382B` | Birincil CTA, aktif sekme, "BEĞEN" |
+| `colors.accentDark` | `#D92B1F` | Küçük metin, link, indirim rozeti yazısı |
+| `colors.accentSoft` | `rgba(254,56,43,0.1)` | Rozet ve switch zemini |
+| `colors.tabInactive` | `#9CA3AF` | Pasif sekme |
+| `colors.destructive` | `#DC2626` | Yalnızca minimal silme metin butonları |
+| `colors.inverseSurface` / `inverseText` | antrasit / beyaz | Toast, dolgulu CTA yazısı |
+
+`radius`: kart 24, buton 16, chip full. `spacing`: 4 / 8 / 12 / 16 / 24 / 32.
+`shadows.card` yumuşaktır (`opacity 0.08`, `radius 16`); derinlik border ile
+desteklenir. Süreler ve deste derinlik basamakları
+[`lib/motion.ts`](lib/motion.ts) içinde.
+
+İkincil butonlar beyaz zemin + `border` + antrasit metin, birincil butonlar
+dolgulu `accent` + beyaz metindir. Ürün görselinin altına koyu scrim
+uygulanmaz; bilgi alanı kartın alt bandında beyaz zeminde durur.
+
+Fiyat alarmı bir kullanıcı ayarı değil, **sistem davranışıdır**: beğeni
+kaydedilirken `notify_on_price_drop` her zaman `true` yazılır, arayüzde alarm
+anahtarı yoktur.
 
 ## Proje yapısı
 
@@ -211,7 +256,7 @@ kabin/
 │   └── VirtualTryOnModal.tsx
 ├── data/                   # mock katalog + sample CSV
 ├── hooks/                  # useAuth + AuthProvider
-├── lib/                    # Supabase client, deep link, rıza, gizlilik
+├── lib/                    # tema, hareket, Supabase client, deep link, rıza
 ├── modal/                  # CatVTON FastAPI (Modal)
 ├── scripts/                # import, seed, görsel çıkarma
 ├── services/               # feed, VTON, hesap, satın al

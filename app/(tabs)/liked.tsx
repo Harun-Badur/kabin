@@ -6,7 +6,6 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   View,
 } from 'react-native';
@@ -17,6 +16,8 @@ import RefreshSpinner from '../../components/RefreshSpinner';
 import SkeletonShimmer from '../../components/SkeletonShimmer';
 import VirtualTryOnModal from '../../components/VirtualTryOnModal';
 import { logger } from '../../lib/logger';
+import { colors, radius, shadows, spacing } from '../../lib/theme';
+import { openProductPage } from '../../services/deeplinkService';
 import { useAppStore } from '../../store/useAppStore';
 import {
   formatTryPrice,
@@ -30,20 +31,22 @@ import {
 /** Sekmeye her dönüşte sorgu atmamak için taze sayılan süre. */
 const REFRESH_TTL_MS = 30_000;
 const LIKED_SKELETON_KEYS = ['s1', 's2', 's3'] as const;
+const THUMBNAIL_WIDTH = 112;
+const THUMBNAIL_MIN_HEIGHT = 148;
 
 interface LikedItemProps {
   item: LikedProduct;
   onTryOn: (product: Product) => void;
+  onOpenStore: (product: Product) => void;
   onDelete: (product: Product) => void;
-  onToggleNotify: (productId: string, value: boolean) => void;
   isDeleting: boolean;
 }
 
 function LikedItem({
   item,
   onTryOn,
+  onOpenStore,
   onDelete,
-  onToggleNotify,
   isDeleting,
 }: LikedItemProps) {
   const { product } = item;
@@ -74,12 +77,29 @@ function LikedItem({
         />
       )}
       <View style={styles.meta}>
-        <Text style={styles.brand} numberOfLines={1}>
-          {product.brand}
-        </Text>
-        <Text style={styles.title} numberOfLines={2}>
-          {product.title}
-        </Text>
+        <View style={styles.metaHeader}>
+          <View style={styles.metaCopy}>
+            <Text style={styles.brand} numberOfLines={1}>
+              {product.brand}
+            </Text>
+            <Text style={styles.title} numberOfLines={2}>
+              {product.title}
+            </Text>
+          </View>
+          <PressableScale
+            onPress={() => onDelete(product)}
+            disabled={isDeleting}
+            style={styles.deleteButton}
+            accessibilityRole="button"
+            accessibilityLabel="Sil"
+          >
+            {isDeleting ? (
+              <ActivityIndicator color={colors.textSecondary} size="small" />
+            ) : (
+              <Text style={styles.deleteButtonText}>Sil</Text>
+            )}
+          </PressableScale>
+        </View>
         <View style={styles.priceRow}>
           {hasDrop && typeof previousPrice === 'number' ? (
             <Text style={styles.previousPrice}>
@@ -96,19 +116,6 @@ function LikedItem({
           ) : null}
         </View>
 
-        <View style={styles.alertRow}>
-          <Text style={styles.alertLabel}>
-            {item.notifyOnPriceDrop ? 'Fiyat alarmı açık' : 'Fiyat alarmı kapalı'}
-          </Text>
-          <Switch
-            value={item.notifyOnPriceDrop}
-            onValueChange={(value) => onToggleNotify(product.id, value)}
-            trackColor={{ false: '#CBD5E1', true: '#86EFAC' }}
-            thumbColor={item.notifyOnPriceDrop ? '#16A34A' : '#F8FAFC'}
-            accessibilityLabel="Fiyat alarmı"
-          />
-        </View>
-
         <View style={styles.actions}>
           <PressableScale
             onPress={() => onTryOn(product)}
@@ -119,17 +126,12 @@ function LikedItem({
             <Text style={styles.tryButtonText}>Tekrar Dene</Text>
           </PressableScale>
           <PressableScale
-            onPress={() => onDelete(product)}
-            disabled={isDeleting}
-            style={styles.deleteButton}
+            onPress={() => onOpenStore(product)}
+            style={styles.shopButton}
             accessibilityRole="button"
-            accessibilityLabel="Sil"
+            accessibilityLabel="Mağazaya git"
           >
-            {isDeleting ? (
-              <ActivityIndicator color="#DC2626" size="small" />
-            ) : (
-              <Text style={styles.deleteButtonText}>Sil</Text>
-            )}
+            <Text style={styles.shopButtonText}>Mağazaya Git</Text>
           </PressableScale>
         </View>
       </View>
@@ -141,7 +143,6 @@ export default function LikedScreen() {
   const likedProducts = useAppStore((state) => state.likedProducts);
   const sessionSyncStatus = useAppStore((state) => state.sessionSyncStatus);
   const unlikeProduct = useAppStore((state) => state.unlikeProduct);
-  const updateLikeAlert = useAppStore((state) => state.updateLikeAlert);
   const refreshLikedProducts = useAppStore(
     (state) => state.refreshLikedProducts,
   );
@@ -181,20 +182,6 @@ export default function LikedScreen() {
     }, [reloadLikes]),
   );
 
-  const handleToggleNotify = useCallback(
-    (productId: string, value: boolean): Promise<void> =>
-      updateLikeAlert(productId, { notifyOnPriceDrop: value }).catch(
-        (error: unknown) => {
-          logger.error('Alarm anahtarı güncellenemedi', { error });
-          Alert.alert(
-            'Kaydedilemedi',
-            'Fiyat alarmı güncellenirken bir sorun oluştu.',
-          );
-        },
-      ),
-    [updateLikeAlert],
-  );
-
   const handleDelete = useCallback(
     (product: Product): void => {
       Alert.alert(
@@ -226,6 +213,10 @@ export default function LikedScreen() {
     [unlikeProduct],
   );
 
+  const handleOpenStore = useCallback((product: Product): void => {
+    void openProductPage(product);
+  }, []);
+
   if (sessionSyncStatus === 'loading' || !hasFreshLoad) {
     return (
       <View style={styles.root}>
@@ -233,7 +224,11 @@ export default function LikedScreen() {
         <View style={styles.list}>
           {LIKED_SKELETON_KEYS.map((key) => (
             <View key={key} style={styles.card}>
-              <SkeletonShimmer width={112} height={148} borderRadius={0} />
+              <SkeletonShimmer
+                width={THUMBNAIL_WIDTH}
+                height={THUMBNAIL_MIN_HEIGHT}
+                borderRadius={0}
+              />
               <View style={styles.skeletonMeta}>
                 <SkeletonShimmer width={88} height={10} borderRadius={6} />
                 <SkeletonShimmer width={160} height={14} borderRadius={6} />
@@ -253,53 +248,51 @@ export default function LikedScreen() {
         <View style={styles.flex}>
           <RefreshSpinner visible={isRefreshing} />
           <ScrollView
-          contentContainerStyle={styles.centered}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={() => {
-                void reloadLikes(true);
-              }}
-              tintColor="transparent"
-              colors={['transparent']}
-            />
-          }
-        >
-          <Text style={styles.emptyEmoji}>♡</Text>
-          <Text style={styles.emptyTitle}>
-            Henüz beğendiğin ürün yok. Keşfetmeye başla!
-          </Text>
+            contentContainerStyle={styles.centered}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={() => {
+                  void reloadLikes(true);
+                }}
+                tintColor="transparent"
+                colors={['transparent']}
+              />
+            }
+          >
+            <Text style={styles.emptyEmoji}>♡</Text>
+            <Text style={styles.emptyTitle}>
+              Henüz beğendiğin ürün yok. Keşfetmeye başla!
+            </Text>
           </ScrollView>
         </View>
       ) : (
         <View style={styles.flex}>
           <RefreshSpinner visible={isRefreshing} />
           <FlatList
-          data={likedProducts}
-          keyExtractor={(item) => item.product.id}
-          contentContainerStyle={styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={() => {
-                void reloadLikes(true);
-              }}
-              tintColor="transparent"
-              colors={['transparent']}
-            />
-          }
-          renderItem={({ item }) => (
-            <LikedItem
-              item={item}
-              onTryOn={setTryOnProduct}
-              onDelete={handleDelete}
-              onToggleNotify={(productId, value) => {
-                void handleToggleNotify(productId, value);
-              }}
-              isDeleting={deletingId === item.product.id}
-            />
-          )}
-        />
+            data={likedProducts}
+            keyExtractor={(item) => item.product.id}
+            contentContainerStyle={styles.list}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefreshing}
+                onRefresh={() => {
+                  void reloadLikes(true);
+                }}
+                tintColor="transparent"
+                colors={['transparent']}
+              />
+            }
+            renderItem={({ item }) => (
+              <LikedItem
+                item={item}
+                onTryOn={setTryOnProduct}
+                onOpenStore={handleOpenStore}
+                onDelete={handleDelete}
+                isDeleting={deletingId === item.product.id}
+              />
+            )}
+          />
         </View>
       )}
       <VirtualTryOnModal
@@ -314,7 +307,7 @@ export default function LikedScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.bgSoft,
     paddingTop: 56,
   },
   flex: {
@@ -323,52 +316,58 @@ const styles = StyleSheet.create({
   header: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#0F172A',
-    paddingHorizontal: 20,
-    marginBottom: 16,
+    color: colors.text,
+    paddingHorizontal: spacing.xl,
+    marginBottom: spacing.lg,
   },
   list: {
-    paddingHorizontal: 16,
-    paddingBottom: 24,
-    gap: 12,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xl,
+    gap: spacing.md,
   },
   card: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 18,
+    backgroundColor: colors.surface,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.hairline,
     overflow: 'hidden',
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
+    ...shadows.card,
   },
   image: {
-    width: 112,
-    minHeight: 148,
-    backgroundColor: '#E2E8F0',
+    width: THUMBNAIL_WIDTH,
+    minHeight: THUMBNAIL_MIN_HEIGHT,
+    backgroundColor: colors.bgSoft,
   },
   imageFallback: {
-    width: 112,
-    minHeight: 148,
+    width: THUMBNAIL_WIDTH,
+    minHeight: THUMBNAIL_MIN_HEIGHT,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E2E8F0',
+    backgroundColor: colors.bgSoft,
   },
   imageFallbackText: {
-    color: '#64748B',
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   meta: {
     flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
     justifyContent: 'space-between',
+  },
+  metaHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  metaCopy: {
+    flex: 1,
   },
   skeletonMeta: {
     flex: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.lg,
     justifyContent: 'space-between',
   },
   brand: {
@@ -376,104 +375,101 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
-    color: '#64748B',
+    color: colors.textSecondary,
     marginBottom: 2,
   },
   title: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#0F172A',
-    marginBottom: 6,
+    color: colors.text,
+    marginBottom: spacing.sm,
   },
   priceRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
+    gap: spacing.sm,
+    marginBottom: spacing.md,
     flexWrap: 'wrap',
   },
   previousPrice: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#94A3B8',
+    color: colors.textSecondary,
     textDecorationLine: 'line-through',
   },
   price: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#0F172A',
+    color: colors.text,
   },
   livePriceDrop: {
-    color: '#16A34A',
+    color: colors.accentDark,
   },
   dropBadge: {
-    backgroundColor: '#DCFCE7',
-    borderRadius: 999,
-    paddingHorizontal: 8,
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.chip,
+    paddingHorizontal: spacing.sm,
     paddingVertical: 3,
   },
   dropBadgeText: {
-    color: '#16A34A',
+    color: colors.accentDark,
     fontSize: 12,
     fontWeight: '800',
   },
-  alertRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  alertLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#475569',
-    flex: 1,
-    paddingRight: 8,
-  },
   actions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: spacing.sm,
   },
   tryButton: {
     flex: 1,
-    backgroundColor: '#0F172A',
-    borderRadius: 10,
-    paddingVertical: 8,
+    backgroundColor: colors.accent,
+    borderRadius: radius.button,
+    paddingVertical: spacing.md,
     alignItems: 'center',
   },
   tryButtonText: {
-    color: '#F8FAFC',
+    color: colors.inverseText,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  shopButton: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.button,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  shopButtonText: {
+    color: colors.text,
     fontSize: 13,
     fontWeight: '700',
   },
   deleteButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#FECACA',
-    borderRadius: 10,
-    paddingVertical: 8,
-    alignItems: 'center',
+    paddingLeft: spacing.xs,
+    paddingVertical: spacing.xs,
   },
   deleteButtonText: {
-    color: '#DC2626',
-    fontSize: 13,
-    fontWeight: '700',
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
   },
   centered: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
+    paddingHorizontal: spacing.xxl,
   },
   emptyEmoji: {
     fontSize: 42,
-    marginBottom: 12,
-    color: '#94A3B8',
+    marginBottom: spacing.md,
+    color: colors.textSecondary,
   },
   emptyTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#475569',
+    color: colors.textSecondary,
     textAlign: 'center',
     lineHeight: 26,
   },

@@ -3,9 +3,10 @@ import { BackHandler, StyleSheet } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { Compass, Heart, User } from 'lucide-react-native';
 import { TAB_TRANSITION_MS } from '../../lib/motion';
+import { colors, spacing } from '../../lib/theme';
 
-const ACTIVE_COLOR = '#0F172A';
-const INACTIVE_COLOR = '#94A3B8';
+const ACTIVE_COLOR = colors.accent;
+const INACTIVE_COLOR = colors.tabInactive;
 const ICON_SIZE = 22;
 
 export default function TabsLayout() {
@@ -71,11 +72,11 @@ export default function TabsLayout() {
 
 const styles = StyleSheet.create({
   bar: {
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#E2E8F0',
-    paddingTop: 8,
-    paddingHorizontal: 8,
+    backgroundColor: colors.bg,
+    borderTopWidth: 1,
+    borderTopColor: colors.hairline,
+    paddingTop: spacing.sm,
+    paddingHorizontal: spacing.sm,
   },
   item: {
     paddingVertical: 6,
@@ -85,6 +86,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   scene: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.bgSoft,
   },
 });
