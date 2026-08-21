@@ -114,6 +114,68 @@ Aynı komut proje içinde `tsx` ile de çalışır: `npx tsx scripts/simulate-pr
 
 Gerçek Expo push göndermek için: `npx tsx scripts/simulate-price-drop.ts --send`
 
+## Build & Release
+
+Uygulama kimliği: Android `com.kabin.app`, iOS `app.kabin.mobile`. Sürüm
+`app.json` içinde tutulur (`version` + `android.versionCode`); `eas.json`
+`appVersionSource: "local"` kullandığı için sürüm numaralarının tek kaynağı
+`app.json`'dır.
+
+### Tek seferlik kurulum
+
+```bash
+npm install -g eas-cli
+eas login              # expo.dev hesabı
+eas init               # extra.eas.projectId değerini app.json'a yazar
+```
+
+### Build profilleri
+
+| Profil | Çıktı | Kullanım |
+|--------|-------|----------|
+| `development` | APK + dev client | Cihazda native modül debug |
+| `preview` | APK | Dahili test, cihaza doğrudan kurulum |
+| `production` | AAB | Play Store yüklemesi (`autoIncrement`) |
+
+```bash
+# Dahili test için kurulabilir APK
+eas build --platform android --profile preview
+
+# Play Store için AAB (versionCode otomatik artar)
+eas build --platform android --profile production
+
+# Play Console'a yükle (internal track, draft)
+eas submit --platform android --profile production
+```
+
+Yerel manifest doğrulaması (bulut kredisi harcamaz):
+
+```bash
+npx expo config --type public
+npx expo prebuild --platform android --no-install   # android/ üretir, gitignore'da
+```
+
+`prebuild` çalıştırdıktan sonra `android/` klasörünü sil ve `package.json`
+içindeki `android`/`ios` script'lerinin `expo start --android` olarak kaldığını
+doğrula; prebuild bunları `expo run:*` olarak değiştiriyor ve proje CNG
+(managed) akışında kalmalı.
+
+### İzinler
+
+Manifeste yalnızca `INTERNET`, `POST_NOTIFICATIONS` ve galeri okuma izinleri
+girer. `expo-image-picker` varsayılan olarak `CAMERA` ve `RECORD_AUDIO` da
+ekliyor; ikisi de `android.blockedPermissions` ile kaldırılıyor çünkü uygulama
+kamera ya da mikrofon kullanmıyor. Bu listeyi genişletmeden önce Play Console
+"Veri güvenliği" formunun da güncellenmesi gerekir.
+
+### Marka varlıkları
+
+`assets/` altındaki simge ve splash görselleri Kabin lacivertiyle (`#0F172A`)
+üretilmiş **placeholder**'lardır. Yayın öncesi tasarımcı çıktısıyla
+değiştirilmeli; boyutlar korunmalı (`icon.png` 1024×1024,
+`android-icon-foreground.png` 1024×1024 saydam, `notification-icon.png` 96×96
+beyaz silüet + saydam).
+
 ## Proje yapısı
 
 ```
