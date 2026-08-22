@@ -72,6 +72,8 @@ yollarda bu başlığı arar; eksik veya hatalıysa 401 döner.
 2. `supabase/schema.sql`
 3. `supabase/price_tracking.sql`
 4. `supabase/rate_limits.sql`
+5. `supabase/variations.sql`
+6. `supabase/model_studio.sql`
 
 EAS bulut derlemesi `.env` dosyasını görmez; `EXPO_PUBLIC_*` değerleri
 `eas.json` profillerinin `env` bloğunda olmalı (anon key istemciye zaten
@@ -268,6 +270,12 @@ kabin/
 - Affiliate etiketlerinin canlıya alınması
 - Daha fazla pazaryeri
 - Mağaza yayını (EAS / Play Store)
+
+## Davet paylaşımı
+
+Profildeki **Arkadaşını Davet Et** paylaşım metni şimdilik gizlilik politikası
+URL’sini (`PRIVACY_URL`) kullanır. Mağaza yayını sonrası bu link Play Store /
+App Store ürün sayfasıyla değiştirilecek.
 
 ## Gizlilik ve hesap silme
 

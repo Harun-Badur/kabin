@@ -10,6 +10,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import { logger } from '../lib/logger';
 import { getRequiredSupabaseClient } from '../lib/supabase';
 import type { GarmentCategory, TryOnOptions } from '../types/vton';
+import { appendTryOnHistory } from './vtonHistoryService';
 
 const IMAGE_MAX_WIDTH = 768;
 const IMAGE_JPEG_QUALITY = 0.8;
@@ -60,7 +61,12 @@ const getVtonProxyUrl = (): string => {
   return url;
 };
 
-const getAccessToken = async (): Promise<string> => {
+interface VtonSession {
+  accessToken: string;
+  userId: string;
+}
+
+const getVtonSession = async (): Promise<VtonSession> => {
   const client = getRequiredSupabaseClient();
   const { data, error } = await client.auth.getSession();
 
@@ -72,11 +78,12 @@ const getAccessToken = async (): Promise<string> => {
   }
 
   const token = data.session?.access_token?.trim();
-  if (!token) {
+  const userId = data.session?.user.id;
+  if (!token || !userId) {
     throw new VtonServiceError('Sanal deneme için giriş yapmalısın.');
   }
 
-  return token;
+  return { accessToken: token, userId };
 };
 
 const toClothType = (
@@ -106,10 +113,9 @@ const readImageAsBase64 = async (uri: string): Promise<string> => {
 /**
  * Modal'dan gelen base64 gövde React state'inde tutulursa her render'da
  * megabaytlık string kopyalanır. Sonucu cache dizinine yazıp yalnızca
- * file:// URI'sini döndürüyoruz; bir sonraki denemede eski dosya silinir.
+ * file:// URI'sini döndürüyoruz. Eski dosyalar geçmiş kotası (20) dolunca
+ * vtonHistory tarafında silinir.
  */
-let lastResultUri: string | null = null;
-
 const persistResultImage = async (base64: string): Promise<string> => {
   const directory = cacheDirectory;
   if (!directory) {
@@ -118,18 +124,37 @@ const persistResultImage = async (base64: string): Promise<string> => {
     );
   }
 
-  if (lastResultUri) {
-    await deleteAsync(lastResultUri, { idempotent: true }).catch(
-      (error: unknown) => {
-        logger.warn('Önceki deneme dosyası silinemedi', { error });
-      },
-    );
-  }
-
   const uri = `${directory}kabin-tryon-${Date.now()}.jpg`;
   await writeAsStringAsync(uri, base64, { encoding: EncodingType.Base64 });
-  lastResultUri = uri;
   return uri;
+};
+
+const rememberTryOnResult = async (
+  userId: string,
+  options: TryOnOptions,
+  imageUri: string,
+): Promise<void> => {
+  try {
+    const evicted = await appendTryOnHistory(userId, {
+      productId: options.productId,
+      title: options.productTitle,
+      imageUri,
+      ts: Date.now(),
+      productUrl: options.productUrl,
+      affiliateUrl: options.affiliateUrl,
+    });
+    await Promise.all(
+      evicted.map((entry) =>
+        deleteAsync(entry.imageUri, { idempotent: true }).catch(
+          (error: unknown) => {
+            logger.warn('Eski deneme görseli silinemedi', { error });
+          },
+        ),
+      ),
+    );
+  } catch (error) {
+    logger.warn('Sanal deneme geçmişi kaydedilemedi', { error });
+  }
 };
 
 const extractDetail = (body: string): string => {
@@ -244,7 +269,7 @@ export const tryOnGarment = async (
 ): Promise<string> => {
   try {
     const endpoint = getVtonProxyUrl();
-    const accessToken = await getAccessToken();
+    const session = await getVtonSession();
     const preparedUri = await limitPersonImage(personImageUri);
     const personImageBase64 = await readImageAsBase64(preparedUri);
 
@@ -266,7 +291,7 @@ export const tryOnGarment = async (
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${session.accessToken}`,
       },
       body: JSON.stringify(payload),
     });
@@ -299,7 +324,9 @@ export const tryOnGarment = async (
       );
     }
 
-    return persistResultImage(resultBase64);
+    const resultUri = await persistResultImage(resultBase64);
+    await rememberTryOnResult(session.userId, options, resultUri);
+    return resultUri;
   } catch (error) {
     if (error instanceof VtonServiceError) {
       throw error;

@@ -1,26 +1,290 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Linking,
+  ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { useAuthContext } from '../../hooks/useAuthContext';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import * as StoreReview from 'expo-store-review';
+import {
+  ChevronRight,
+  Gift,
+  Lock,
+  LogOut,
+  Sparkles,
+  Star,
+  User,
+} from 'lucide-react-native';
+import InviteCodeModal from '../../components/InviteCodeModal';
 import PressableScale from '../../components/PressableScale';
+import SizeStudioSheet from '../../components/SizeStudioSheet';
+import TryOnHistorySheet from '../../components/TryOnHistorySheet';
+import { useAuthContext } from '../../hooks/useAuthContext';
+import { hapticSwipeDecision } from '../../lib/haptics';
+import { buildInviteShareMessage } from '../../lib/inviteShare';
 import { logger } from '../../lib/logger';
-import { PRIVACY_URL } from '../../lib/privacy';
-import { colors, radius, shadows, spacing } from '../../lib/theme';
+import { PRIVACY_URL, SUPPORT_EMAIL } from '../../lib/privacy';
+import { colors, radius, spacing } from '../../lib/theme';
 import { deleteAccount } from '../../services/accountService';
+import {
+  createModelPhotoSignedUrl,
+  fetchStudioProfile,
+  removeModelPhoto,
+  uploadModelPhoto,
+  upsertStudioProfile,
+} from '../../services/profileService';
+import {
+  type GarmentSize,
+  type StyleTag,
+  type StudioProfilePatch,
+  type UserStudioProfile,
+} from '../../types/profile';
+
+const AVATAR_SIZE = 56;
+const AVATAR_RADIUS = 16;
+const ICON_SM = 18;
+const ICON_AVATAR = 26;
+const TOAST_DURATION_MS = 1600;
+const INVITE_SAVED_TOAST = 'Kod alındı — yakında aktifleşecek';
+
+const emptyStudio = (userId: string): UserStudioProfile => ({
+  userId,
+  heightCm: null,
+  weightKg: null,
+  topSize: null,
+  bottomSize: null,
+  styleTags: [],
+  modelPhotoPath: null,
+});
+
+interface MenuRowProps {
+  label: string;
+  icon: ReactNode;
+  onPress: () => void;
+  accessibilityRole?: 'button' | 'link';
+  accessibilityLabel: string;
+  disabled?: boolean;
+  isLast?: boolean;
+  trailing?: ReactNode;
+}
+
+function MenuRow({
+  label,
+  icon,
+  onPress,
+  accessibilityRole = 'button',
+  accessibilityLabel,
+  disabled = false,
+  isLast = false,
+  trailing,
+}: MenuRowProps) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      disabled={disabled}
+      style={[styles.menuRow, isLast ? null : styles.menuRowBorder]}
+      accessibilityRole={accessibilityRole}
+      accessibilityLabel={accessibilityLabel}
+    >
+      <View style={styles.menuLeading}>
+        {icon}
+        <Text style={styles.menuLabel}>{label}</Text>
+      </View>
+      <View style={styles.menuTrailing}>
+        {trailing}
+        <ChevronRight color={colors.tabInactive} size={ICON_SM} />
+      </View>
+    </PressableScale>
+  );
+}
 
 export default function ProfileScreen() {
   const { user, signOut } = useAuthContext();
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [studio, setStudio] = useState<UserStudioProfile | null>(null);
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [sizeOpen, setSizeOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isBusy = isSigningOut || isDeleting;
+  const userId = user?.id ?? null;
+  const isBusy = isSigningOut || isDeleting || isSaving || uploadProgress !== null;
+  const hasPhoto = photoUri !== null;
+  const currentStudio = studio ?? (userId ? emptyStudio(userId) : null);
+
+  const showToast = useCallback((message: string): void => {
+    if (toastTimeoutRef.current !== null) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToastMessage(message);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage(null);
+      toastTimeoutRef.current = null;
+    }, TOAST_DURATION_MS);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current !== null) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const loadStudio = useCallback(async (id: string): Promise<void> => {
+    try {
+      const profile = await fetchStudioProfile(id);
+      setStudio(profile);
+      if (profile.modelPhotoPath) {
+        const signed = await createModelPhotoSignedUrl(profile.modelPhotoPath);
+        setPhotoUri(signed);
+      } else {
+        setPhotoUri(null);
+      }
+    } catch (error) {
+      logger.error('Stüdyo profili yüklenemedi', { error });
+      setErrorMessage('Profil bilgileri yüklenemedi. Lütfen tekrar dene.');
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!userId) {
+        return;
+      }
+      void loadStudio(userId);
+    }, [loadStudio, userId]),
+  );
+
+  useEffect(() => {
+    if (!userId) {
+      setStudio(null);
+      setPhotoUri(null);
+    }
+  }, [userId]);
+
+  const persistPatch = async (patch: StudioProfilePatch): Promise<void> => {
+    if (!userId) {
+      return;
+    }
+    setIsSaving(true);
+    setErrorMessage(null);
+    try {
+      const next = await upsertStudioProfile(userId, patch);
+      setStudio(next);
+      hapticSwipeDecision();
+    } catch (error) {
+      logger.error('Stüdyo kaydı başarısız', { error });
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Değişiklik kaydedilemedi. Lütfen tekrar dene.',
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handlePickModelPhoto = async (): Promise<void> => {
+    if (!userId) {
+      return;
+    }
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setErrorMessage(
+          'Galerine erişim izni verilmedi. Ayarlardan izin verip tekrar dene.',
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [3, 4],
+        quality: 0.8,
+      });
+      if (result.canceled || !result.assets[0]) {
+        return;
+      }
+
+      setErrorMessage(null);
+      setUploadProgress(0);
+      const next = await uploadModelPhoto(userId, result.assets[0].uri, {
+        onProgress: setUploadProgress,
+      });
+      setStudio(next);
+      setPhotoUri(result.assets[0].uri);
+      hapticSwipeDecision();
+    } catch (error) {
+      logger.error('Model fotoğrafı yüklenemedi', { error });
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Fotoğraf yüklenemedi. Lütfen tekrar dene.',
+      );
+    } finally {
+      setUploadProgress(null);
+    }
+  };
+
+  const runRemovePhoto = async (): Promise<void> => {
+    if (!userId) {
+      return;
+    }
+    setIsSaving(true);
+    setErrorMessage(null);
+    try {
+      const next = await removeModelPhoto(userId);
+      setStudio(next);
+      setPhotoUri(null);
+      hapticSwipeDecision();
+    } catch (error) {
+      logger.error('Model fotoğrafı kaldırılamadı', { error });
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Fotoğraf kaldırılamadı. Lütfen tekrar dene.',
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleRemovePhoto = (): void => {
+    if (!hasPhoto) {
+      return;
+    }
+    Alert.alert(
+      'Fotoğrafı kaldır',
+      'Kayıtlı model fotoğrafın silinecek. Sanal denemede yeniden seçmen gerekir.',
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Kaldır',
+          style: 'destructive',
+          onPress: () => {
+            void runRemovePhoto();
+          },
+        },
+      ],
+    );
+  };
 
   const handleSignOut = async (): Promise<void> => {
     setIsSigningOut(true);
@@ -79,56 +343,264 @@ export default function ProfileScreen() {
     });
   };
 
+  const handleInvite = async (): Promise<void> => {
+    try {
+      await Share.share({ message: buildInviteShareMessage(PRIVACY_URL) });
+    } catch (error) {
+      logger.error('Davet paylaşımı açılamadı', { error });
+    }
+  };
+
+  const handleInviteCodeSave = (_code: string): void => {
+    setInviteOpen(false);
+    showToast(INVITE_SAVED_TOAST);
+  };
+
+  const handleFeedback = async (): Promise<void> => {
+    try {
+      const available = await StoreReview.isAvailableAsync();
+      if (available) {
+        await StoreReview.requestReview();
+        return;
+      }
+    } catch (error) {
+      logger.warn('Mağaza değerlendirmesi açılamadı', { error });
+    }
+
+    const mailUrl = `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Kabin geri bildirim')}`;
+    void Linking.openURL(mailUrl).catch((error: unknown) => {
+      logger.error('Destek e-postası açılamadı', { error });
+      Alert.alert(
+        'Geri bildirim açılamadı',
+        `${SUPPORT_EMAIL} adresine yazabilirsin.`,
+      );
+    });
+  };
+
+  const handleStyleToggle = (tag: StyleTag): void => {
+    if (!studio) {
+      return;
+    }
+    const nextTags = studio.styleTags.includes(tag)
+      ? studio.styleTags.filter((item) => item !== tag)
+      : [...studio.styleTags, tag];
+    void persistPatch({ styleTags: nextTags });
+  };
+
   return (
     <View style={styles.root}>
       <Text style={styles.header}>Profil</Text>
-      <View style={styles.card}>
-        <Text style={styles.label}>E-posta</Text>
-        <Text style={styles.email}>{user?.email ?? 'E-posta yok'}</Text>
-        <Text style={styles.hint}>
-          Bu ekran yakında dolap tercihleri ve beden bilgisi için genişleyecek.
-        </Text>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+      >
         {errorMessage ? (
           <Text style={styles.error}>{errorMessage}</Text>
         ) : null}
-        <PressableScale
-          onPress={handleOpenPrivacy}
-          style={styles.linkButton}
-          accessibilityRole="link"
-          accessibilityLabel="Gizlilik politikası"
+
+        <View style={styles.heroRow}>
+          <PressableScale
+            onLongPress={handleRemovePhoto}
+            disabled={!hasPhoto || isBusy}
+            style={styles.avatar}
+            accessibilityRole="button"
+            accessibilityLabel="Model fotoğrafı"
+          >
+            {hasPhoto ? (
+              <Image
+                source={{ uri: photoUri }}
+                style={styles.avatarImage}
+                contentFit="cover"
+                cachePolicy="none"
+                recyclingKey={photoUri}
+              />
+            ) : (
+              <View style={styles.avatarPlaceholder}>
+                <User color={colors.textSecondary} size={ICON_AVATAR} />
+              </View>
+            )}
+            {uploadProgress !== null ? (
+              <View style={styles.avatarScrim}>
+                <ActivityIndicator color={colors.inverseText} />
+              </View>
+            ) : null}
+          </PressableScale>
+          <View style={styles.heroCopy}>
+            <Text style={styles.email} numberOfLines={1}>
+              {user?.email ?? 'E-posta yok'}
+            </Text>
+            <View
+              style={[
+                styles.badge,
+                hasPhoto ? styles.badgeActive : styles.badgeIdle,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.badgeText,
+                  hasPhoto ? styles.badgeTextActive : styles.badgeTextIdle,
+                ]}
+              >
+                {hasPhoto ? 'AI Manken: Aktif' : 'AI Manken: Kur'}
+              </Text>
+            </View>
+          </View>
+          <PressableScale
+            onPress={() => {
+              void handlePickModelPhoto();
+            }}
+            disabled={isBusy}
+            style={styles.editButton}
+            accessibilityRole="button"
+            accessibilityLabel="Düzenle"
+          >
+            <Text style={styles.editButtonText}>Düzenle</Text>
+          </PressableScale>
+        </View>
+
+        <LinearGradient
+          colors={[colors.accentSoft, colors.surface]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.viralCard}
         >
-          <Text style={styles.linkButtonText}>Gizlilik Politikası</Text>
-        </PressableScale>
+          <View style={styles.viralHeader}>
+            <View style={styles.giftWrap}>
+              <Gift color={colors.accentDark} size={22} />
+            </View>
+            <View style={styles.viralCopy}>
+              <Text style={styles.viralTitle}>Arkadaşını Davet Et</Text>
+              <Text style={styles.viralSubtitle}>
+                Arkadaşlarını davet et, ekstra sanal deneme hakkı kazan.
+              </Text>
+            </View>
+          </View>
+          <PressableScale
+            onPress={() => {
+              void handleInvite();
+            }}
+            style={styles.inviteButton}
+            accessibilityRole="button"
+            accessibilityLabel="Davet et"
+          >
+            <Text style={styles.inviteButtonText}>Davet Et</Text>
+          </PressableScale>
+          <PressableScale
+            onPress={() => setInviteOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Davet kodu gir"
+          >
+            <Text style={styles.inviteLink}>Davet Kodu Gir</Text>
+          </PressableScale>
+        </LinearGradient>
+
+        <View>
+          <Text style={styles.groupLabel}>Aktivite</Text>
+          <View style={styles.menuCard}>
+            <MenuRow
+              label="Denemelerim"
+              icon={<Sparkles color={colors.icon} size={ICON_SM} />}
+              onPress={() => setHistoryOpen(true)}
+              accessibilityLabel="Denemelerim"
+            />
+            <MenuRow
+              label="Beden & Stil Tercihlerim"
+              icon={<User color={colors.icon} size={ICON_SM} />}
+              onPress={() => setSizeOpen(true)}
+              accessibilityLabel="Beden ve stil tercihlerim"
+              isLast
+            />
+          </View>
+        </View>
+
+        <View>
+          <Text style={styles.groupLabel}>Destek & hesap</Text>
+          <View style={styles.menuCard}>
+            <MenuRow
+              label="Geri Bildirim & Değerlendir"
+              icon={<Star color={colors.icon} size={ICON_SM} />}
+              onPress={() => {
+                void handleFeedback();
+              }}
+              accessibilityLabel="Geri bildirim ve değerlendir"
+            />
+            <MenuRow
+              label="Gizlilik Politikası"
+              icon={<Lock color={colors.icon} size={ICON_SM} />}
+              onPress={handleOpenPrivacy}
+              accessibilityRole="link"
+              accessibilityLabel="Gizlilik politikası"
+            />
+            <MenuRow
+              label="Çıkış Yap"
+              icon={<LogOut color={colors.icon} size={ICON_SM} />}
+              onPress={() => {
+                void handleSignOut();
+              }}
+              accessibilityLabel="Çıkış yap"
+              disabled={isBusy}
+              isLast
+              trailing={
+                isSigningOut ? (
+                  <ActivityIndicator color={colors.text} />
+                ) : null
+              }
+            />
+          </View>
+        </View>
+
         <PressableScale
-          onPress={() => {
-            void handleSignOut();
-          }}
+          onPress={handleDeleteAccount}
           disabled={isBusy}
-          style={styles.signOut}
+          style={styles.deleteLink}
           accessibilityRole="button"
-          accessibilityLabel="Çıkış yap"
+          accessibilityLabel="Hesabımı sil"
         >
-          {isSigningOut ? (
-            <ActivityIndicator color={colors.text} />
+          {isDeleting ? (
+            <ActivityIndicator color={colors.tabInactive} />
           ) : (
-            <Text style={styles.signOutText}>Çıkış yap</Text>
+            <Text style={styles.deleteLinkText}>Hesabımı Sil</Text>
           )}
         </PressableScale>
-      </View>
+      </ScrollView>
 
-      <PressableScale
-        onPress={handleDeleteAccount}
-        disabled={isBusy}
-        style={styles.deleteLink}
-        accessibilityRole="button"
-        accessibilityLabel="Hesabı sil"
-      >
-        {isDeleting ? (
-          <ActivityIndicator color={colors.destructive} />
-        ) : (
-          <Text style={styles.deleteLinkText}>Hesabı Sil</Text>
-        )}
-      </PressableScale>
+      {toastMessage ? (
+        <View style={styles.toast} pointerEvents="none">
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </View>
+      ) : null}
+
+      <TryOnHistorySheet
+        visible={historyOpen}
+        userId={userId}
+        onClose={() => setHistoryOpen(false)}
+      />
+      {currentStudio ? (
+        <SizeStudioSheet
+          visible={sizeOpen}
+          profile={currentStudio}
+          disabled={isBusy}
+          onClose={() => setSizeOpen(false)}
+          onHeightChange={(value) => {
+            void persistPatch({ heightCm: value });
+          }}
+          onWeightChange={(value) => {
+            void persistPatch({ weightKg: value });
+          }}
+          onTopSizeChange={(value: GarmentSize) => {
+            void persistPatch({ topSize: value });
+          }}
+          onBottomSizeChange={(value: GarmentSize) => {
+            void persistPatch({ bottomSize: value });
+          }}
+          onStyleToggle={handleStyleToggle}
+        />
+      ) : null}
+      <InviteCodeModal
+        visible={inviteOpen}
+        onClose={() => setInviteOpen(false)}
+        onSave={handleInviteCodeSave}
+      />
     </View>
   );
 }
@@ -146,71 +618,206 @@ const styles = StyleSheet.create({
     color: colors.text,
     marginBottom: spacing.xl,
   },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    borderColor: colors.hairline,
-    padding: spacing.xl,
-    ...shadows.card,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: spacing.sm,
-  },
-  email: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: spacing.md,
-  },
-  hint: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: colors.textSecondary,
-    marginBottom: spacing.xl,
+  scroll: {
+    gap: spacing.lg,
+    paddingBottom: spacing.xxl,
   },
   error: {
     color: colors.destructive,
     fontWeight: '600',
-    marginBottom: spacing.md,
   },
-  linkButton: {
-    paddingVertical: spacing.md,
+  heroRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.sm,
+    gap: spacing.md,
   },
-  linkButtonText: {
-    color: colors.accentDark,
+  avatar: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_RADIUS,
+    overflow: 'hidden',
+    backgroundColor: colors.input,
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.inverseSurface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroCopy: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  email: {
+    color: colors.text,
     fontSize: 15,
     fontWeight: '700',
-    textDecorationLine: 'underline',
   },
-  signOut: {
+  badge: {
+    alignSelf: 'flex-start',
+    borderRadius: radius.chip,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  badgeActive: {
+    backgroundColor: colors.accentSoft,
+  },
+  badgeIdle: {
+    backgroundColor: colors.hairline,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  badgeTextActive: {
+    color: colors.accentDark,
+  },
+  badgeTextIdle: {
+    color: colors.textSecondary,
+  },
+  editButton: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.button,
-    paddingVertical: spacing.lg,
-    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.input,
   },
-  signOutText: {
+  editButtonText: {
     color: colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  viralCard: {
+    borderRadius: radius.card,
+    padding: spacing.lg,
+    gap: spacing.md,
+    overflow: 'hidden',
+  },
+  viralHeader: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    alignItems: 'flex-start',
+  },
+  giftWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.button,
+    backgroundColor: colors.input,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viralCopy: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  viralTitle: {
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  viralSubtitle: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '500',
+  },
+  inviteButton: {
+    backgroundColor: colors.accent,
+    borderRadius: radius.button,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inviteButtonText: {
+    color: colors.inverseText,
     fontSize: 16,
     fontWeight: '800',
   },
+  inviteLink: {
+    color: colors.accentDark,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  groupLabel: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
+  },
+  menuCard: {
+    backgroundColor: colors.input,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.hairline,
+    overflow: 'hidden',
+  },
+  menuRow: {
+    minHeight: 54,
+    paddingHorizontal: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  menuRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.hairline,
+  },
+  menuLeading: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  menuLabel: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  menuTrailing: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   deleteLink: {
-    marginTop: 'auto',
     alignSelf: 'center',
     paddingVertical: spacing.lg,
     marginBottom: spacing.xl,
   },
   deleteLinkText: {
-    color: colors.destructive,
+    color: colors.tabInactive,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  toast: {
+    position: 'absolute',
+    left: spacing.xl,
+    right: spacing.xl,
+    bottom: spacing.xxl,
+    backgroundColor: colors.inverseSurface,
+    borderRadius: radius.button,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  toastText: {
+    color: colors.inverseText,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -6,11 +6,14 @@ import {
   Dimensions,
   Linking,
   Modal,
+  type LayoutChangeEvent,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -22,11 +25,26 @@ import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import { ImageIcon, RotateCcw, Sparkles, X } from 'lucide-react-native';
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  Heart,
+  ImageIcon,
+  RotateCcw,
+  Share2,
+  ShoppingBag,
+  Sparkles,
+} from 'lucide-react-native';
 import PressableScale from './PressableScale';
-import SkeletonShimmer from './SkeletonShimmer';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useAuthContext } from '../hooks/useAuthContext';
 import { grantVtonConsent, hasVtonConsent } from '../lib/consent';
 import { hapticSuccess } from '../lib/haptics';
 import { logger } from '../lib/logger';
@@ -38,26 +56,55 @@ import {
 } from '../lib/motion';
 import { PRIVACY_URL } from '../lib/privacy';
 import { colors, radius, spacing } from '../lib/theme';
+import { buildTryOnShareMessage } from '../lib/vtonShare';
+import { openProductPage } from '../services/deeplinkService';
+import { insertLikedProduct } from '../services/likeService';
+import { resolveSavedModelPhotoUri } from '../services/profileService';
 import {
   tryOnGarment,
   VtonServiceError,
 } from '../services/vtonService';
+import { useAppStore } from '../store/useAppStore';
 import type { Product } from '../types/product';
 import type { TryOnStatus } from '../types/vton';
 
 const IMAGE_MAX_WIDTH = 768;
 const ICON_SIZE = 16;
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const GARMENT_THUMB_SIZE = 36;
+const GARMENT_THUMB_RADIUS = 12;
+const BADGE_RADIUS = 18;
+const BADGE_INSET = 16;
+const BADGE_PADDING = 6;
+const BADGE_PADDING_RIGHT = 12;
+const BADGE_MAX_WIDTH = '70%';
+const BADGE_BLUR_INTENSITY = 50;
+const BADGE_GLASS = 'rgba(255, 255, 255, 0.82)';
+const GLASS_BUTTON_SIZE = 44;
+const TOAST_DURATION_MS = 1600;
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_CLOSE_DURATION_MS = 220;
-const LOADING_MESSAGES = [
-  'Kombinin hazırlanıyor...',
-  'Kıyafet giydiriliyor...',
-] as const;
-const LOADING_MESSAGE_INTERVAL_MS = 2500;
+const LOADING_COPY = 'Kıyafet giydiriliyor...';
 const SLOW_HINT_AFTER_MS = 20_000;
 const SLOW_HINT_TEXT = 'İlk deneme biraz uzun sürebilir';
-const LOADING_SHIMMER_WIDTH = SCREEN_WIDTH - spacing.xl * 2;
-const LOADING_SHIMMER_HEIGHT = 160;
+const SHIMMER_DURATION_MS = 2200;
+const SHIMMER_BAND_RATIO = 0.4;
+const LOADING_DIM = 'rgba(0, 0, 0, 0.40)';
+const LOADING_META = '#D1D5DB';
+const SHIMMER_GRADIENT = [
+  'transparent',
+  'rgba(255, 255, 255, 0.18)',
+  'transparent',
+] as const;
+const IMMERSIVE_FADE_MS = 180;
+const PINCH_SCALE_MIN = 1;
+const PINCH_SCALE_MAX = 4;
+const CANVAS_MARGIN_X = spacing.md;
+const CANVAS_MARGIN_Y = spacing.xs;
+const SCREEN_PAD_TOP_EXTRA = 8;
+const SCREEN_PAD_BOTTOM = spacing.md;
+const HEADER_CHROME_HEIGHT = 32;
+const FOOTER_CHROME_HEIGHT = 80;
+const PINCH_RESET_SPRING = { damping: 16, stiffness: 220 } as const;
 
 type ConsentStatus = 'checking' | 'required' | 'granted';
 
@@ -67,6 +114,30 @@ export interface VirtualTryOnModalProps {
   onClose: () => void;
 }
 
+interface GlassIconButtonProps {
+  accessibilityLabel: string;
+  onPress: () => void;
+  children: ReactNode;
+}
+
+function GlassIconButton({
+  accessibilityLabel,
+  onPress,
+  children,
+}: GlassIconButtonProps) {
+  return (
+    <PressableScale
+      onPress={onPress}
+      style={styles.glassButton}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
+      <BlurView intensity={28} tint="light" style={StyleSheet.absoluteFill} />
+      <View style={styles.glassButtonIcon}>{children}</View>
+    </PressableScale>
+  );
+}
+
 const resetMessage = '';
 
 export default function VirtualTryOnModal({
@@ -74,25 +145,59 @@ export default function VirtualTryOnModal({
   product,
   onClose,
 }: VirtualTryOnModalProps) {
+  const insets = useSafeAreaInsets();
+  const { user } = useAuthContext();
+  const likedProducts = useAppStore((state) => state.likedProducts);
   const [status, setStatus] = useState<TryOnStatus>('idle');
   const [errorMessage, setErrorMessage] = useState(resetMessage);
   const [personImageUri, setPersonImageUri] = useState<string | null>(null);
   const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
   const [consentStatus, setConsentStatus] = useState<ConsentStatus>('checking');
   const [isRendered, setIsRendered] = useState(visible);
-  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
   const [showSlowHint, setShowSlowHint] = useState(false);
+  const [isImmersive, setIsImmersive] = useState(false);
+  const [closetAdded, setClosetAdded] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const lastProductRef = useRef(product);
   if (product) {
     lastProductRef.current = product;
   }
   const displayProduct = product ?? lastProductRef.current;
+  const isInCloset =
+    closetAdded ||
+    (displayProduct !== null &&
+      likedProducts.some((item) => item.product.id === displayProduct.id));
 
-  const pulse = useSharedValue(0.55);
+  const pulse = useSharedValue(0);
+  const shimmerTravel = useSharedValue(0);
+  const canvasHeightSv = useSharedValue(1);
   const sheetProgress = useSharedValue(0);
   const consentProgress = useSharedValue(0);
   const heroProgress = useSharedValue(0);
+  const chromeVisible = useSharedValue(1);
+  const pinchScale = useSharedValue(1);
+  const savedPinchScale = useSharedValue(1);
+
+  const showToast = useCallback((message: string): void => {
+    if (toastTimeoutRef.current !== null) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+    setToastMessage(message);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage(null);
+      toastTimeoutRef.current = null;
+    }, TOAST_DURATION_MS);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current !== null) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!visible) {
@@ -112,6 +217,28 @@ export default function VirtualTryOnModal({
   }, [visible]);
 
   useEffect(() => {
+    if (!visible || consentStatus !== 'granted' || !user?.id) {
+      return;
+    }
+
+    let isMounted = true;
+    void resolveSavedModelPhotoUri(user.id)
+      .then((uri) => {
+        if (!isMounted || !uri) {
+          return;
+        }
+        setPersonImageUri((current) => current ?? uri);
+      })
+      .catch((error: unknown) => {
+        logger.error('Kayıtlı model fotoğrafı yüklenemedi', { error });
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [consentStatus, user?.id, visible]);
+
+  useEffect(() => {
     if (status === 'loading') {
       pulse.value = withRepeat(
         withTiming(1, { duration: 900, easing: Easing.inOut(Easing.ease) }),
@@ -121,27 +248,42 @@ export default function VirtualTryOnModal({
       return;
     }
 
-    pulse.value = withTiming(0.55, { duration: 200 });
+    pulse.value = withTiming(0, { duration: 200 });
   }, [pulse, status]);
 
   useEffect(() => {
     if (status !== 'loading') {
-      setLoadingMessageIndex(0);
+      cancelAnimation(shimmerTravel);
+      shimmerTravel.value = 0;
+      return;
+    }
+
+    shimmerTravel.value = 0;
+    shimmerTravel.value = withRepeat(
+      withTiming(1, {
+        duration: SHIMMER_DURATION_MS,
+        easing: Easing.inOut(Easing.ease),
+      }),
+      -1,
+      false,
+    );
+
+    return () => {
+      cancelAnimation(shimmerTravel);
+    };
+  }, [shimmerTravel, status]);
+
+  useEffect(() => {
+    if (status !== 'loading') {
       setShowSlowHint(false);
       return;
     }
 
-    const rotateId = setInterval(() => {
-      setLoadingMessageIndex(
-        (current) => (current + 1) % LOADING_MESSAGES.length,
-      );
-    }, LOADING_MESSAGE_INTERVAL_MS);
     const slowHintId = setTimeout(() => {
       setShowSlowHint(true);
     }, SLOW_HINT_AFTER_MS);
 
     return () => {
-      clearInterval(rotateId);
       clearTimeout(slowHintId);
     };
   }, [status]);
@@ -151,17 +293,44 @@ export default function VirtualTryOnModal({
   useEffect(
     () => () => {
       cancelAnimation(pulse);
+      cancelAnimation(shimmerTravel);
       cancelAnimation(sheetProgress);
       cancelAnimation(consentProgress);
       cancelAnimation(heroProgress);
+      cancelAnimation(chromeVisible);
+      cancelAnimation(pinchScale);
     },
-    [consentProgress, heroProgress, pulse, sheetProgress],
+    [
+      chromeVisible,
+      consentProgress,
+      heroProgress,
+      pinchScale,
+      pulse,
+      shimmerTravel,
+      sheetProgress,
+    ],
   );
 
   const pulseStyle = useAnimatedStyle(() => ({
-    opacity: pulse.value,
-    transform: [{ scale: 0.92 + pulse.value * 0.12 }],
+    opacity: interpolate(pulse.value, [0, 1], [0.72, 1]),
+    transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.08]) }],
   }));
+
+  const shimmerStyle = useAnimatedStyle(() => {
+    const band = canvasHeightSv.value * SHIMMER_BAND_RATIO;
+    return {
+      height: Math.max(band, 1),
+      transform: [
+        {
+          translateY: interpolate(
+            shimmerTravel.value,
+            [0, 1],
+            [-band, canvasHeightSv.value],
+          ),
+        },
+      ],
+    };
+  });
 
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: sheetProgress.value * MODAL_BACKDROP_MAX_OPACITY,
@@ -188,9 +357,59 @@ export default function VirtualTryOnModal({
 
   const heroStyle = useAnimatedStyle(() => ({
     opacity: interpolate(heroProgress.value, [0, 1], [0.35, 1]),
-    transform: [
-      { scale: interpolate(heroProgress.value, [0, 1], [0.78, 1]) },
-    ],
+    marginHorizontal: interpolate(
+      chromeVisible.value,
+      [0, 1],
+      [0, CANVAS_MARGIN_X],
+    ),
+    marginVertical: interpolate(
+      chromeVisible.value,
+      [0, 1],
+      [0, CANVAS_MARGIN_Y],
+    ),
+    borderRadius: interpolate(chromeVisible.value, [0, 1], [0, radius.card]),
+    borderWidth: interpolate(chromeVisible.value, [0, 1], [0, 1]),
+  }));
+
+  const screenPadStyle = useAnimatedStyle(() => ({
+    paddingTop: interpolate(
+      chromeVisible.value,
+      [0, 1],
+      [0, insets.top + SCREEN_PAD_TOP_EXTRA],
+    ),
+    paddingBottom: interpolate(
+      chromeVisible.value,
+      [0, 1],
+      [0, Math.max(insets.bottom, SCREEN_PAD_BOTTOM)],
+    ),
+  }));
+
+  const headerChromeStyle = useAnimatedStyle(() => ({
+    opacity: chromeVisible.value,
+    maxHeight: interpolate(
+      chromeVisible.value,
+      [0, 1],
+      [0, HEADER_CHROME_HEIGHT],
+    ),
+    marginBottom: interpolate(chromeVisible.value, [0, 1], [0, spacing.sm]),
+  }));
+
+  const footerChromeStyle = useAnimatedStyle(() => ({
+    opacity: chromeVisible.value,
+    maxHeight: interpolate(
+      chromeVisible.value,
+      [0, 1],
+      [0, FOOTER_CHROME_HEIGHT],
+    ),
+    paddingTop: interpolate(chromeVisible.value, [0, 1], [0, 12]),
+  }));
+
+  const badgeChromeStyle = useAnimatedStyle(() => ({
+    opacity: chromeVisible.value,
+  }));
+
+  const zoomStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pinchScale.value }],
   }));
 
   const resetState = useCallback((): void => {
@@ -198,6 +417,9 @@ export default function VirtualTryOnModal({
     setErrorMessage(resetMessage);
     setPersonImageUri(null);
     setResultImageUrl(null);
+    setIsImmersive(false);
+    setClosetAdded(false);
+    setToastMessage(null);
   }, []);
 
   const finishExit = useCallback((): void => {
@@ -278,6 +500,33 @@ export default function VirtualTryOnModal({
     };
   }, [handleClose, visible]);
 
+  const resetImmersiveView = useCallback((): void => {
+    setIsImmersive(false);
+    cancelAnimation(chromeVisible);
+    cancelAnimation(pinchScale);
+    chromeVisible.value = 1;
+    pinchScale.value = 1;
+    savedPinchScale.value = 1;
+  }, [chromeVisible, pinchScale, savedPinchScale]);
+
+  const toggleImmersive = useCallback((): void => {
+    setIsImmersive((current) => {
+      const next = !current;
+      chromeVisible.value = withTiming(next ? 0 : 1, {
+        duration: IMMERSIVE_FADE_MS,
+        easing: Easing.inOut(Easing.ease),
+      });
+      return next;
+    });
+  }, [chromeVisible]);
+
+  useEffect(() => {
+    if (status === 'success') {
+      return;
+    }
+    resetImmersiveView();
+  }, [resetImmersiveView, status]);
+
   const handlePickPhoto = useCallback(async (): Promise<void> => {
     try {
       const permission =
@@ -338,6 +587,10 @@ export default function VirtualTryOnModal({
       const outputUrl = await tryOnGarment(personImageUri, product.imageUrl, {
         garmentDescription: product.garmentDescription,
         category: product.category,
+        productId: product.id,
+        productTitle: product.title,
+        productUrl: product.productUrl,
+        affiliateUrl: product.affiliateUrl,
       });
       setResultImageUrl(outputUrl);
       setStatus('success');
@@ -358,7 +611,65 @@ export default function VirtualTryOnModal({
     setStatus('idle');
     setErrorMessage(resetMessage);
     setResultImageUrl(null);
+    setIsImmersive(false);
   }, []);
+
+  const handleShare = useCallback(async (): Promise<void> => {
+    if (!displayProduct) {
+      return;
+    }
+    try {
+      await Share.share({ message: buildTryOnShareMessage(displayProduct) });
+    } catch (error) {
+      logger.error('Sanal deneme paylaşılamadı', { error });
+    }
+  }, [displayProduct]);
+
+  const handleAddToCloset = useCallback(async (): Promise<void> => {
+    if (!displayProduct) {
+      return;
+    }
+    if (!user) {
+      showToast('Beğenmek için giriş yap');
+      return;
+    }
+    if (isInCloset) {
+      setClosetAdded(true);
+      showToast('Zaten dolabında');
+      return;
+    }
+
+    try {
+      await insertLikedProduct(user.id, displayProduct);
+      useAppStore.setState((state) => {
+        if (state.likedProducts.some((item) => item.product.id === displayProduct.id)) {
+          return state;
+        }
+        return {
+          likedProducts: [
+            {
+              product: displayProduct,
+              notifyOnPriceDrop: true,
+              likedAt: new Date().toISOString(),
+            },
+            ...state.likedProducts,
+          ],
+        };
+      });
+      setClosetAdded(true);
+      showToast('Dolabına eklendi');
+    } catch (error) {
+      logger.error('Dolaba eklenemedi', { error });
+      showToast('Dolaba eklenemedi. Tekrar dene.');
+    }
+  }, [displayProduct, isInCloset, showToast, user]);
+
+  const handleOpenStore = useCallback((): void => {
+    if (!displayProduct) {
+      return;
+    }
+    void openProductPage(displayProduct);
+  }, [displayProduct]);
 
   const handleAcceptConsent = useCallback((): void => {
     setConsentStatus('granted');
@@ -380,6 +691,54 @@ export default function VirtualTryOnModal({
   }
 
   const isConsentFlow = consentStatus !== 'granted';
+  const isSuccess = status === 'success' && resultImageUrl !== null;
+  const isLoading = status === 'loading';
+  const canvasUri = isSuccess ? resultImageUrl : personImageUri;
+  const loadingBackdropUri = personImageUri;
+
+  const handleCanvasLayout = (event: LayoutChangeEvent): void => {
+    canvasHeightSv.value = event.nativeEvent.layout.height;
+  };
+
+  const doubleTap = Gesture.Tap()
+    .enabled(isSuccess)
+    .numberOfTaps(2)
+    .onEnd((_event, success) => {
+      if (!success) {
+        return;
+      }
+      cancelAnimation(pinchScale);
+      pinchScale.value = withSpring(1, PINCH_RESET_SPRING);
+      savedPinchScale.value = 1;
+    });
+
+  const singleTap = Gesture.Tap()
+    .enabled(isSuccess)
+    .numberOfTaps(1)
+    .onEnd((_event, success) => {
+      if (!success) {
+        return;
+      }
+      runOnJS(toggleImmersive)();
+    });
+
+  const pinch = Gesture.Pinch()
+    .enabled(isSuccess)
+    .onUpdate((event) => {
+      const next = savedPinchScale.value * event.scale;
+      pinchScale.value = Math.min(
+        PINCH_SCALE_MAX,
+        Math.max(PINCH_SCALE_MIN, next),
+      );
+    })
+    .onEnd(() => {
+      savedPinchScale.value = pinchScale.value;
+    });
+
+  const imageGestures = Gesture.Simultaneous(
+    Gesture.Exclusive(doubleTap, singleTap),
+    pinch,
+  );
 
   return (
     <Modal
@@ -389,12 +748,12 @@ export default function VirtualTryOnModal({
       statusBarTranslucent
       onRequestClose={handleClose}
     >
-      <View style={styles.modalRoot}>
+      <GestureHandlerRootView style={styles.modalRoot}>
         <Animated.View
           pointerEvents="none"
           style={[styles.backdrop, backdropStyle]}
         />
-        <Animated.View style={[styles.screen, sheetStyle]}>
+        <Animated.View style={[styles.screen, sheetStyle, screenPadStyle]}>
           {isConsentFlow ? (
             consentStatus === 'checking' ? (
               <View style={styles.centerBlock}>
@@ -460,69 +819,53 @@ export default function VirtualTryOnModal({
             )
           ) : (
             <>
-        <View style={styles.header}>
-          <View style={styles.headerCopy}>
-            <Text style={styles.kicker}>Sanal deneme</Text>
-          </View>
-          <PressableScale
-            onPress={handleClose}
-            style={styles.closeButton}
-            accessibilityRole="button"
-            accessibilityLabel="Kapat"
-          >
-            <X color={colors.text} size={22} />
-          </PressableScale>
-        </View>
-
-        <Animated.View style={[styles.heroCard, heroStyle]}>
-          <Image
-            source={{ uri: displayProduct.imageUrl }}
-            style={styles.heroImage}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            recyclingKey={displayProduct.id}
-          />
+        <Animated.View
+          style={[styles.header, headerChromeStyle]}
+          pointerEvents={isImmersive ? 'none' : 'auto'}
+        >
+          <Text style={styles.studioTitle}>Deneme Kabini</Text>
         </Animated.View>
-        <View style={styles.garmentRow}>
-          <View style={styles.garmentCopy}>
-            <Text style={styles.garmentKicker}>Giydirilecek ürün</Text>
-            <Text style={styles.garmentTitle} numberOfLines={1}>
-              {displayProduct.title}
-            </Text>
-          </View>
-        </View>
 
-        <View style={styles.body}>
-          {status === 'loading' ? (
-            <View style={styles.centerBlock}>
-              <SkeletonShimmer
-                width={LOADING_SHIMMER_WIDTH}
-                height={LOADING_SHIMMER_HEIGHT}
-                borderRadius={radius.card}
-              />
-              <Animated.View style={[styles.loadingOrb, pulseStyle]}>
-                <Sparkles color={colors.accent} size={36} />
-              </Animated.View>
-              <Text style={styles.loadingText}>
-                {LOADING_MESSAGES[loadingMessageIndex]}
+        <View style={styles.canvasSlot}>
+        <Animated.View
+          style={[styles.canvas, heroStyle]}
+          onLayout={handleCanvasLayout}
+        >
+          <GestureDetector gesture={imageGestures}>
+            <Animated.View
+              collapsable={false}
+              style={[styles.canvasImage, zoomStyle]}
+              pointerEvents={isSuccess ? 'auto' : 'none'}
+            >
+              {isLoading && loadingBackdropUri ? (
+                <Image
+                  source={{ uri: loadingBackdropUri }}
+                  style={styles.canvasImage}
+                  contentFit="cover"
+                  cachePolicy="none"
+                  recyclingKey={`${loadingBackdropUri}-loading`}
+                />
+              ) : null}
+
+              {!isLoading && status !== 'error' && canvasUri ? (
+                <Image
+                  source={{ uri: canvasUri }}
+                  style={styles.canvasImage}
+                  contentFit="cover"
+                  cachePolicy="none"
+                  recyclingKey={canvasUri}
+                />
+              ) : null}
+            </Animated.View>
+          </GestureDetector>
+
+          {status === 'idle' && !personImageUri ? (
+            <View style={styles.placeholder}>
+              <ImageIcon color={colors.textSecondary} size={42} />
+              <Text style={styles.placeholderTitle}>Fotoğrafını seç</Text>
+              <Text style={styles.placeholderHint}>
+                Ayakta, net ve mümkünse 3:4 oranlı bir kare en iyi sonucu verir.
               </Text>
-              {showSlowHint ? (
-                <Text style={styles.slowHint}>{SLOW_HINT_TEXT}</Text>
-              ) : (
-                <Text style={styles.hint}>{displayProduct.brand}</Text>
-              )}
-            </View>
-          ) : null}
-
-          {status === 'success' && resultImageUrl ? (
-            <View style={styles.resultBlock}>
-              <Image
-                source={{ uri: resultImageUrl }}
-                style={styles.resultImage}
-                contentFit="contain"
-                cachePolicy="none"
-                recyclingKey={resultImageUrl}
-              />
             </View>
           ) : null}
 
@@ -533,79 +876,146 @@ export default function VirtualTryOnModal({
             </View>
           ) : null}
 
-          {status === 'idle' ? (
-            <View style={styles.previewBlock}>
-              {personImageUri ? (
-                <Image
-                  source={{ uri: personImageUri }}
-                  style={styles.previewImage}
-                  contentFit="cover"
-                  cachePolicy="none"
-                  recyclingKey={personImageUri}
+          {isLoading ? (
+            <View style={styles.loadingOverlay} pointerEvents="none">
+              <View style={styles.loadingDim} />
+              <Animated.View style={[styles.shimmerBand, shimmerStyle]}>
+                <LinearGradient
+                  colors={SHIMMER_GRADIENT}
+                  start={{ x: 0.5, y: 0 }}
+                  end={{ x: 0.5, y: 1 }}
+                  style={StyleSheet.absoluteFill}
                 />
-              ) : (
-                <View style={styles.placeholder}>
-                  <ImageIcon color={colors.textSecondary} size={42} />
-                  <Text style={styles.placeholderTitle}>Fotoğrafını seç</Text>
-                  <Text style={styles.placeholderHint}>
-                    Ayakta, net ve mümkünse 3:4 oranlı bir kare en iyi sonucu verir.
-                  </Text>
-                </View>
-              )}
+              </Animated.View>
+              <View style={styles.loadingCopy}>
+                <Animated.View style={pulseStyle}>
+                  <Sparkles color={colors.inverseText} size={36} />
+                </Animated.View>
+                <Text style={styles.loadingText}>{LOADING_COPY}</Text>
+                <Text style={styles.loadingProduct} numberOfLines={1}>
+                  {`${displayProduct.brand} · ${displayProduct.title}`}
+                </Text>
+                {showSlowHint ? (
+                  <Text style={styles.slowHint}>{SLOW_HINT_TEXT}</Text>
+                ) : null}
+              </View>
             </View>
           ) : null}
+
+          <Animated.View
+            style={[styles.garmentBadge, badgeChromeStyle]}
+            pointerEvents="none"
+          >
+            <BlurView
+              intensity={BADGE_BLUR_INTENSITY}
+              tint="light"
+              style={StyleSheet.absoluteFill}
+            />
+            <Image
+              source={{ uri: displayProduct.imageUrl }}
+              style={styles.garmentThumb}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              recyclingKey={displayProduct.id}
+            />
+            <Text
+              style={styles.garmentBadgeLabel}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {displayProduct.title}
+            </Text>
+          </Animated.View>
+
+          {isSuccess ? (
+            <View style={styles.toolColumn}>
+              <GlassIconButton
+                accessibilityLabel="Paylaş"
+                onPress={() => {
+                  void handleShare();
+                }}
+              >
+                <Share2 color={colors.icon} size={ICON_SIZE} />
+              </GlassIconButton>
+              <GlassIconButton
+                accessibilityLabel="Dolaba ekle"
+                onPress={() => {
+                  void handleAddToCloset();
+                }}
+              >
+                <Heart
+                  color={isInCloset ? colors.accent : colors.icon}
+                  fill={isInCloset ? colors.accent : 'transparent'}
+                  size={ICON_SIZE}
+                />
+              </GlassIconButton>
+            </View>
+          ) : null}
+        </Animated.View>
         </View>
 
-        <View style={styles.footer}>
-          {status === 'idle' && !personImageUri ? (
-            <PressableScale onPress={handlePickPhoto} style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>Fotoğraf Seç</Text>
-            </PressableScale>
-          ) : null}
-
-          {status === 'idle' && personImageUri ? (
-            <View style={styles.footerRow}>
-              <PressableScale onPress={handlePickPhoto} style={styles.secondaryButton}>
-                <Text style={styles.secondaryButtonText}>Değiştir</Text>
-              </PressableScale>
-              <PressableScale onPress={handleTryOn} style={styles.primaryButton}>
-                <Text style={styles.primaryButtonText}>🚀 Üzerimde Dene</Text>
-              </PressableScale>
-            </View>
-          ) : null}
-
-          {status === 'success' ? (
-            <View style={styles.footerRow}>
-              <PressableScale onPress={handleRetry} style={styles.secondaryButton}>
+        <Animated.View
+          style={[styles.footerChrome, footerChromeStyle]}
+          pointerEvents={isImmersive ? 'none' : 'auto'}
+        >
+          {isSuccess ? (
+            <View
+              style={styles.footerRow}
+              pointerEvents={isLoading ? 'none' : 'auto'}
+            >
+              <PressableScale
+                onPress={handleRetry}
+                style={styles.secondaryButton}
+                accessibilityRole="button"
+                accessibilityLabel="Tekrar dene"
+              >
                 <RotateCcw color={colors.text} size={ICON_SIZE} />
                 <Text style={styles.secondaryButtonText}>Tekrar Dene</Text>
               </PressableScale>
-              <PressableScale onPress={handleClose} style={styles.primaryButton}>
-                <Text style={styles.primaryButtonText}>Kapat</Text>
+              <PressableScale
+                onPress={handleOpenStore}
+                style={styles.primaryButton}
+                accessibilityRole="button"
+                accessibilityLabel="Mağazaya git"
+              >
+                <ShoppingBag color={colors.inverseText} size={ICON_SIZE} />
+                <Text style={styles.primaryButtonText}>Mağazaya Git</Text>
               </PressableScale>
             </View>
-          ) : null}
-
-          {status === 'error' ? (
-            <View style={styles.footerRow}>
-              <PressableScale onPress={handleClose} style={styles.secondaryButton}>
-                <Text style={styles.secondaryButtonText}>Kapat</Text>
+          ) : (
+            <View
+              style={[styles.footerRow, isLoading ? styles.footerHidden : null]}
+              pointerEvents={isLoading ? 'none' : 'auto'}
+            >
+              <PressableScale
+                onPress={handlePickPhoto}
+                style={styles.secondaryButton}
+                accessibilityRole="button"
+                accessibilityLabel="Modeli değiştir"
+              >
+                <Text style={styles.secondaryButtonText}>Modeli Değiştir</Text>
               </PressableScale>
               <PressableScale
-                onPress={personImageUri ? handleTryOn : handlePickPhoto}
+                onPress={handleTryOn}
                 style={styles.primaryButton}
+                accessibilityRole="button"
+                accessibilityLabel="Üzerimde dene"
               >
-                <Text style={styles.primaryButtonText}>
-                  {personImageUri ? 'Tekrar Dene' : 'Fotoğraf Seç'}
-                </Text>
+                <Sparkles color={colors.inverseText} size={ICON_SIZE} />
+                <Text style={styles.primaryButtonText}>Üzerimde Dene</Text>
               </PressableScale>
             </View>
-          ) : null}
-        </View>
+          )}
+        </Animated.View>
+        {toastMessage ? (
+          <View style={styles.toast} pointerEvents="none">
+            <Text style={styles.toastText}>{toastMessage}</Text>
+          </View>
+        ) : null}
             </>
           )}
         </Animated.View>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -621,22 +1031,21 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.bg,
-    paddingTop: 54,
-    paddingBottom: 28,
   },
   consentFill: {
     flex: 1,
   },
   header: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.xl,
-    marginBottom: spacing.lg,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    overflow: 'hidden',
   },
-  headerCopy: {
-    flex: 1,
-    marginRight: spacing.md,
+  studioTitle: {
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: '600',
+    letterSpacing: -0.3,
   },
   kicker: {
     color: colors.textSecondary,
@@ -646,78 +1055,98 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: spacing.xs,
   },
-  title: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.chip,
-    backgroundColor: colors.bgSoft,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
+  canvasSlot: {
+    flex: 1,
     justifyContent: 'center',
   },
-  heroCard: {
-    marginHorizontal: spacing.xl,
-    marginBottom: spacing.md,
-    height: 196,
-    borderRadius: radius.card,
+  canvas: {
+    flex: 1,
     overflow: 'hidden',
     backgroundColor: colors.bgSoft,
-    borderWidth: 1,
     borderColor: colors.hairline,
   },
-  heroImage: {
-    width: '100%',
-    height: '100%',
+  canvasImage: {
+    ...StyleSheet.absoluteFillObject,
   },
-  garmentRow: {
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+  },
+  loadingDim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: LOADING_DIM,
+  },
+  shimmerBand: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+  },
+  loadingCopy: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+    gap: spacing.sm,
+  },
+  loadingProduct: {
+    marginTop: spacing.xs,
+    color: LOADING_META,
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  garmentBadge: {
+    position: 'absolute',
+    bottom: BADGE_INSET,
+    left: BADGE_INSET,
+    zIndex: 4,
+    maxWidth: BADGE_MAX_WIDTH,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
-    marginHorizontal: spacing.xl,
-    marginBottom: spacing.lg,
-    padding: spacing.md,
-    borderRadius: radius.button,
-    backgroundColor: colors.bgSoft,
-    borderWidth: 1,
-    borderColor: colors.hairline,
+    gap: spacing.sm,
+    padding: BADGE_PADDING,
+    paddingRight: BADGE_PADDING_RIGHT,
+    borderRadius: BADGE_RADIUS,
+    overflow: 'hidden',
+    backgroundColor: BADGE_GLASS,
   },
-  garmentCopy: {
-    flex: 1,
-  },
-  garmentKicker: {
-    color: colors.textSecondary,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 2,
-  },
-  garmentTitle: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  body: {
-    flex: 1,
-    paddingHorizontal: spacing.xl,
-  },
-  previewBlock: {
-    flex: 1,
-    borderRadius: radius.card,
+  garmentThumb: {
+    zIndex: 1,
+    width: GARMENT_THUMB_SIZE,
+    height: GARMENT_THUMB_SIZE,
+    borderRadius: GARMENT_THUMB_RADIUS,
     overflow: 'hidden',
     backgroundColor: colors.bgSoft,
-    borderWidth: 1,
-    borderColor: colors.hairline,
   },
-  previewImage: {
-    width: '100%',
-    height: '100%',
+  garmentBadgeLabel: {
+    zIndex: 1,
+    flex: 1,
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  toolColumn: {
+    position: 'absolute',
+    top: spacing.md,
+    right: spacing.md,
+    zIndex: 4,
+    gap: spacing.sm,
+  },
+  glassButton: {
+    width: GLASS_BUTTON_SIZE,
+    height: GLASS_BUTTON_SIZE,
+    borderRadius: GLASS_BUTTON_SIZE / 2,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.glass,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  glassButtonIcon: {
+    zIndex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   placeholder: {
     flex: 1,
@@ -737,15 +1166,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     textAlign: 'center',
-  },
-  resultBlock: {
-    flex: 1,
-    overflow: 'hidden',
-    backgroundColor: colors.bgSoft,
-  },
-  resultImage: {
-    width: '100%',
-    height: '100%',
   },
   centerBlock: {
     flex: 1,
@@ -783,34 +1203,16 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
     marginTop: spacing.sm,
   },
-  loadingOrb: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: spacing.lg,
-    marginBottom: 18,
-  },
-  spinner: {
-    marginBottom: spacing.lg,
-  },
   loadingText: {
-    color: colors.text,
+    color: colors.inverseText,
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: '800',
     textAlign: 'center',
     lineHeight: 26,
     paddingHorizontal: spacing.sm,
   },
-  hint: {
-    color: colors.textSecondary,
-    marginTop: spacing.sm,
-    fontSize: 14,
-  },
   slowHint: {
-    color: colors.textSecondary,
+    color: LOADING_META,
     marginTop: spacing.md,
     fontSize: 14,
     fontWeight: '600',
@@ -834,9 +1236,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingTop: 18,
   },
+  footerChrome: {
+    paddingHorizontal: spacing.lg,
+    overflow: 'hidden',
+  },
   footerRow: {
     flexDirection: 'row',
     gap: spacing.md,
+  },
+  footerHidden: {
+    opacity: 0,
   },
   primaryButton: {
     flex: 1,
@@ -845,6 +1254,8 @@ const styles = StyleSheet.create({
     minHeight: 54,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
     paddingHorizontal: spacing.lg,
   },
   primaryButtonText: {
@@ -869,5 +1280,22 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
     fontWeight: '700',
+  },
+  toast: {
+    position: 'absolute',
+    left: spacing.xl,
+    right: spacing.xl,
+    bottom: spacing.xxl,
+    backgroundColor: colors.inverseSurface,
+    borderRadius: radius.button,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  toastText: {
+    color: colors.inverseText,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });
