@@ -2,6 +2,11 @@ import type { GarmentCategory } from './vton';
 
 export type FeedProvider = 'amazon' | 'trendyol' | 'hepsiburada' | 'mock';
 
+export interface ProductColor {
+  name: string;
+  hex: string;
+}
+
 export interface Product {
   id: string;
   imageUrl: string;
@@ -17,6 +22,8 @@ export interface Product {
   productUrl?: string;
   affiliateUrl?: string;
   externalId?: string;
+  colors?: ProductColor[];
+  sizes?: string[];
 }
 
 export interface LikedProduct {

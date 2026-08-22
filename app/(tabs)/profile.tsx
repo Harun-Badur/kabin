@@ -116,26 +116,19 @@ export default function ProfileScreen() {
         </PressableScale>
       </View>
 
-      <View style={styles.dangerCard}>
-        <Text style={styles.dangerTitle}>Hesabı sil</Text>
-        <Text style={styles.dangerHint}>
-          Hesabın ve tüm verilerin kalıcı olarak silinir. Bu işlem geri
-          alınamaz.
-        </Text>
-        <PressableScale
-          onPress={handleDeleteAccount}
-          disabled={isBusy}
-          style={styles.deleteButton}
-          accessibilityRole="button"
-          accessibilityLabel="Hesabımı sil"
-        >
-          {isDeleting ? (
-            <ActivityIndicator color={colors.destructive} />
-          ) : (
-            <Text style={styles.deleteButtonText}>Hesabımı Sil</Text>
-          )}
-        </PressableScale>
-      </View>
+      <PressableScale
+        onPress={handleDeleteAccount}
+        disabled={isBusy}
+        style={styles.deleteLink}
+        accessibilityRole="button"
+        accessibilityLabel="Hesabı sil"
+      >
+        {isDeleting ? (
+          <ActivityIndicator color={colors.destructive} />
+        ) : (
+          <Text style={styles.deleteLinkText}>Hesabı Sil</Text>
+        )}
+      </PressableScale>
     </View>
   );
 }
@@ -209,34 +202,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
   },
-  dangerCard: {
-    marginTop: spacing.xl,
-    backgroundColor: colors.surface,
-    borderRadius: radius.card,
-    padding: spacing.xl,
-    borderWidth: 1,
-    borderColor: colors.hairline,
+  deleteLink: {
+    marginTop: 'auto',
+    alignSelf: 'center',
+    paddingVertical: spacing.lg,
+    marginBottom: spacing.xl,
   },
-  dangerTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  dangerHint: {
-    fontSize: 14,
-    lineHeight: 21,
-    color: colors.textSecondary,
-    marginBottom: spacing.lg,
-  },
-  // Yıkıcı eylem vurgulu blok değil, minimal metin butonu.
-  deleteButton: {
-    alignSelf: 'flex-start',
-    paddingVertical: spacing.md,
-  },
-  deleteButtonText: {
+  deleteLinkText: {
     color: colors.destructive,
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

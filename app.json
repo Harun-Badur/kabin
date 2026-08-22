@@ -7,7 +7,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "backgroundColor": "#FFFFFF",
+    "backgroundColor": "#F7F4F0",
     "primaryColor": "#FE382B",
     "scheme": "kabin",
     "ios": {
@@ -19,7 +19,7 @@
       "package": "com.kabin.app",
       "versionCode": 1,
       "adaptiveIcon": {
-        "backgroundColor": "#0F172A",
+        "backgroundColor": "#FE382B",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
@@ -44,7 +44,7 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 180,
           "resizeMode": "contain",
-          "backgroundColor": "#0F172A"
+          "backgroundColor": "#F7F4F0"
         }
       ],
       [

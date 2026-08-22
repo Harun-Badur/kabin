@@ -1,13 +1,18 @@
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Constants from 'expo-constants';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AppErrorBoundary from '../components/AppErrorBoundary';
+import OnboardingScreen from '../components/OnboardingScreen';
 import { AuthProvider, useAuthContext } from '../hooks/useAuthContext';
 import { logger } from '../lib/logger';
 import { STACK_TRANSITION_MS } from '../lib/motion';
+import {
+  hasCompletedOnboarding,
+  markOnboardingComplete,
+} from '../lib/onboarding';
 import { colors, spacing } from '../lib/theme';
 import { useAppStore } from '../store/useAppStore';
 
@@ -26,12 +31,30 @@ const registerPushIfSupported = async (userId: string): Promise<void> => {
   }
 };
 
+type OnboardingGate = 'checking' | 'required' | 'done';
+
 function RootNavigator() {
   const { user, loading } = useAuthContext();
   const hydrateSession = useAppStore((state) => state.hydrateSession);
   const resetSession = useAppStore((state) => state.resetSession);
+  const [onboardingGate, setOnboardingGate] =
+    useState<OnboardingGate>('checking');
 
   const userId = user?.id ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadGate = async (): Promise<void> => {
+      const completed = await hasCompletedOnboarding();
+      if (!cancelled) {
+        setOnboardingGate(completed ? 'done' : 'required');
+      }
+    };
+    void loadGate();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (userId === null) {
@@ -42,13 +65,23 @@ function RootNavigator() {
     void registerPushIfSupported(userId);
   }, [hydrateSession, resetSession, userId]);
 
-  if (loading) {
+  const handleOnboardingComplete = useCallback((): void => {
+    void markOnboardingComplete().then(() => {
+      setOnboardingGate('done');
+    });
+  }, []);
+
+  if (loading || onboardingGate === 'checking') {
     return (
       <View style={styles.boot}>
         <ActivityIndicator color={colors.accent} size="large" />
         <Text style={styles.bootText}>Kabin açılıyor...</Text>
       </View>
     );
+  }
+
+  if (onboardingGate === 'required') {
+    return <OnboardingScreen onComplete={handleOnboardingComplete} />;
   }
 
   return (

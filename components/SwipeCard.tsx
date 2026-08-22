@@ -32,6 +32,7 @@ import {
   formatTryPrice,
   GARMENT_CATEGORY_LABEL,
   getDisplayPrice,
+  getDropPercent,
   hasCatalogPriceDrop,
   type Product,
 } from '../types/product';
@@ -45,12 +46,9 @@ const EXIT_UP_DISTANCE_PX = SCREEN_HEIGHT * 1.15;
 const PAN_MIN_DISTANCE_PX = 18;
 const EXIT_TIMING = { duration: CARD_EXIT_DURATION_MS } as const;
 const ACTION_ICON_SIZE = 16;
-/** Fashion kadrajı: genişlik/yükseklik 3/4. */
-const IMAGE_ASPECT_RATIO = 3 / 4;
-/** CSS object-position: 50% 20% — kafa/omuz kadrajını korur. */
-const IMAGE_CONTENT_POSITION = { left: '50%', top: '20%' } as const;
-const CARD_INFO_BAND_HEIGHT = 212;
-const MAX_CARD_HEIGHT_RATIO = 0.78;
+/** object-position: top-center — tam boy kadraj (hedef oran ~0.68). */
+const IMAGE_CONTENT_POSITION = { top: 0, left: '50%' } as const;
+const CARD_HEIGHT_RATIO = 0.83;
 
 export type { Product };
 
@@ -370,15 +368,15 @@ export default function SwipeCard({
               pointerEvents="none"
               style={[styles.stamp, styles.likeStamp, likeOverlayStyle]}
             >
-              <Heart color={colors.accent} fill={colors.accent} size={28} />
-              <Text style={styles.likeStampText}>BEĞEN</Text>
+              <Heart color={colors.stampAdd} fill={colors.stampAdd} size={28} />
+              <Text style={styles.likeStampText}>EKLE</Text>
             </Animated.View>
 
             <Animated.View
               pointerEvents="none"
               style={[styles.stamp, styles.passStamp, passOverlayStyle]}
             >
-              <X color={colors.textSecondary} size={28} strokeWidth={3} />
+              <X color={colors.stampPass} size={28} strokeWidth={3} />
               <Text style={styles.passStampText}>GEÇ</Text>
             </Animated.View>
 
@@ -386,8 +384,8 @@ export default function SwipeCard({
               pointerEvents="none"
               style={[styles.stamp, styles.buyStamp, buyOverlayStyle]}
             >
-              <ShoppingBag color={colors.text} size={26} />
-              <Text style={styles.buyStampText}>SATIN AL</Text>
+              <ShoppingBag color={colors.accent} size={26} />
+              <Text style={styles.buyStampText}>MAĞAZAYA</Text>
             </Animated.View>
 
             {isInteractive && !canLike ? (
@@ -417,6 +415,27 @@ export default function SwipeCard({
             <Text style={styles.title} numberOfLines={2}>
               {product.title}
             </Text>
+            {(product.colors && product.colors.length > 0) ||
+            (product.sizes && product.sizes.length > 0) ? (
+              <View style={styles.variationRow}>
+                {product.colors && product.colors.length > 0
+                  ? product.colors.slice(0, 4).map((swatch) => (
+                      <View
+                        key={`${swatch.name}-${swatch.hex}`}
+                        style={[
+                          styles.swatch,
+                          { backgroundColor: swatch.hex },
+                        ]}
+                      />
+                    ))
+                  : null}
+                {product.sizes && product.sizes.length > 0 ? (
+                  <Text style={styles.sizeHint}>
+                    {`· ${product.sizes.length} beden`}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
             <View style={styles.priceRow}>
               {hasCatalogPriceDrop(product) &&
               typeof product.previousPrice === 'number' ? (
@@ -425,6 +444,14 @@ export default function SwipeCard({
                 </Text>
               ) : null}
               <Text style={styles.price}>{formatPrice(product)}</Text>
+              {hasCatalogPriceDrop(product) &&
+              typeof product.previousPrice === 'number' ? (
+                <View style={styles.dropBadge}>
+                  <Text style={styles.dropBadgeText}>
+                    {`↓ %${getDropPercent(product.previousPrice, getDisplayPrice(product))}`}
+                  </Text>
+                </View>
+              ) : null}
             </View>
 
             {isInteractive ? (
@@ -457,20 +484,16 @@ export default function SwipeCard({
   );
 }
 
-const CARD_WIDTH = SCREEN_WIDTH * 0.88;
-const PREFERRED_IMAGE_HEIGHT = CARD_WIDTH / IMAGE_ASPECT_RATIO;
-const IMAGE_HEIGHT = Math.min(
-  PREFERRED_IMAGE_HEIGHT,
-  SCREEN_HEIGHT * MAX_CARD_HEIGHT_RATIO - CARD_INFO_BAND_HEIGHT,
-);
-const CARD_HEIGHT = IMAGE_HEIGHT + CARD_INFO_BAND_HEIGHT;
+/** Ekran kökünün 16px yatay padding’iyle aynı grid; ekstra inset yok. */
+const CARD_WIDTH = SCREEN_WIDTH - spacing.lg * 2;
+const CARD_HEIGHT = SCREEN_HEIGHT * CARD_HEIGHT_RATIO;
 
 export const SWIPE_CARD_WIDTH = CARD_WIDTH;
 export const SWIPE_CARD_HEIGHT = CARD_HEIGHT;
 
 const styles = StyleSheet.create({
   shadowWrap: {
-    width: CARD_WIDTH,
+    width: '100%',
     height: CARD_HEIGHT,
     borderRadius: radius.card,
     backgroundColor: colors.surface,
@@ -485,8 +508,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   imageWrap: {
+    flex: 1,
     width: '100%',
-    height: IMAGE_HEIGHT,
     backgroundColor: colors.bgSoft,
   },
   image: {
@@ -527,12 +550,12 @@ const styles = StyleSheet.create({
   },
   likeStamp: {
     left: spacing.xl,
-    borderColor: colors.accent,
+    borderColor: colors.stampAdd,
     transform: [{ rotate: '-12deg' }],
   },
   passStamp: {
     right: spacing.xl,
-    borderColor: colors.textSecondary,
+    borderColor: colors.stampPass,
     transform: [{ rotate: '12deg' }],
   },
   buyStamp: {
@@ -540,22 +563,22 @@ const styles = StyleSheet.create({
     left: 72,
     right: 72,
     justifyContent: 'center',
-    borderColor: colors.text,
+    borderColor: colors.accent,
   },
   likeStampText: {
-    color: colors.accent,
+    color: colors.stampAdd,
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: 1.2,
   },
   passStampText: {
-    color: colors.textSecondary,
+    color: colors.stampPass,
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: 1.2,
   },
   buyStampText: {
-    color: colors.text,
+    color: colors.accent,
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: 1.2,
@@ -608,9 +631,9 @@ const styles = StyleSheet.create({
   },
   brand: {
     color: colors.textSecondary,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-    letterSpacing: 1.2,
+    letterSpacing: 1.4,
     textTransform: 'uppercase',
     marginBottom: 2,
   },
@@ -621,10 +644,29 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: spacing.xs,
   },
+  variationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  swatch: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  sizeHint: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+  },
   priceRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+    flexWrap: 'wrap',
   },
   previousPrice: {
     color: colors.textSecondary,
@@ -635,6 +677,17 @@ const styles = StyleSheet.create({
   price: {
     color: colors.text,
     fontSize: 20,
+    fontWeight: '800',
+  },
+  dropBadge: {
+    backgroundColor: colors.accentSoft,
+    borderRadius: radius.chip,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  dropBadgeText: {
+    color: colors.accentDark,
+    fontSize: 12,
     fontWeight: '800',
   },
   actions: {

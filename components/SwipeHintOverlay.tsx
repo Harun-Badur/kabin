@@ -96,7 +96,7 @@ export default function SwipeHintOverlay({
         <Animated.View style={[styles.row, bobStyle]}>
           <View style={styles.hint}>
             <ArrowRight color={colors.accent} size={HINT_ICON_SIZE} />
-            <Text style={styles.hintText}>beğen</Text>
+            <Text style={styles.hintText}>ekle</Text>
           </View>
           <View style={styles.hint}>
             <ArrowLeft color={colors.accent} size={HINT_ICON_SIZE} />
@@ -104,7 +104,7 @@ export default function SwipeHintOverlay({
           </View>
           <View style={styles.hint}>
             <ArrowUp color={colors.accent} size={HINT_ICON_SIZE} />
-            <Text style={styles.hintText}>satın al</Text>
+            <Text style={styles.hintText}>mağazaya</Text>
           </View>
         </Animated.View>
         <Text style={styles.caption}>Kapatmak için dokun</Text>

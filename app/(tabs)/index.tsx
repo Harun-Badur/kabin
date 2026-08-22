@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Sparkles } from 'lucide-react-native';
+import { Search, SlidersHorizontal } from 'lucide-react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -12,6 +12,8 @@ import SwipeCard, {
   SWIPE_CARD_WIDTH,
 } from '../../components/SwipeCard';
 import PressableScale from '../../components/PressableScale';
+import FilterSheet from '../../components/FilterSheet';
+import SearchResults from '../../components/SearchResults';
 import SkeletonShimmer from '../../components/SkeletonShimmer';
 import SwipeHintOverlay from '../../components/SwipeHintOverlay';
 import VirtualTryOnModal from '../../components/VirtualTryOnModal';
@@ -25,15 +27,23 @@ import {
   DECK_VISIBLE_COUNT,
 } from '../../lib/motion';
 import { hasSeenSwipeHint, markSwipeHintSeen } from '../../lib/onboarding';
-import { colors, radius, shadows, spacing } from '../../lib/theme';
+import { colors, layout, radius, shadows, spacing } from '../../lib/theme';
 import {
   getRedirectLabel,
   openProductPage,
 } from '../../services/deeplinkService';
+import {
+  filterProducts,
+  type ProductFilters,
+} from '../../services/productService';
 import { useAppStore } from '../../store/useAppStore';
 import type { Product } from '../../types/product';
 
 const TOAST_DURATION_MS = 1600;
+const FILTER_HIT_SIZE = 40;
+const SEARCH_DIVIDER_HEIGHT = 24;
+/** Arama→kart ve kart→alt bar boşluğu; aktif kartın üst/alt kenarı referans. */
+const DECK_VERTICAL_PADDING = 12;
 
 type HintStatus = 'checking' | 'visible' | 'hidden';
 
@@ -88,9 +98,9 @@ function DeckFinishedCard({
         onPress={onOpenLiked}
         style={styles.primaryCta}
         accessibilityRole="button"
-        accessibilityLabel="Beğenilenleri gör"
+        accessibilityLabel="Dolabı gör"
       >
-        <Text style={styles.primaryCtaText}>Beğenilenleri Gör</Text>
+        <Text style={styles.primaryCtaText}>Dolabı Gör</Text>
       </PressableScale>
       <PressableScale
         onPress={onRefresh}
@@ -141,7 +151,7 @@ function StackSlot({
       pointerEvents={isTop ? 'auto' : 'none'}
       style={[
         styles.stackSlot,
-        { zIndex: DECK_VISIBLE_COUNT - depth },
+        { zIndex: DECK_VISIBLE_COUNT - depth, width: '100%' },
         animatedSlotStyle,
       ]}
     >
@@ -164,7 +174,6 @@ export default function FeedScreen() {
   const { user } = useAuthContext();
   const currentProducts = useAppStore((state) => state.currentProducts);
   const feedStatus = useAppStore((state) => state.feedStatus);
-  const feedIsPersonalized = useAppStore((state) => state.feedIsPersonalized);
   const seenCount = useAppStore(
     (state) => state.likedProducts.length + state.passedProductIds.length,
   );
@@ -220,6 +229,9 @@ export default function FeedScreen() {
   const [tryOnProduct, setTryOnProduct] = useState<Product | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [hintStatus, setHintStatus] = useState<HintStatus>('checking');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [filters, setFilters] = useState<ProductFilters>({});
   const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -289,51 +301,101 @@ export default function FeedScreen() {
   // kullanıcıya yeni ürünlerden haberdar olma yolunu göster.
   const isCatalogExhausted = visibleSlots.length === 0 && seenCount > 0;
   const isLoading = feedStatus === 'loading' || feedStatus === 'idle';
+  const isSearching = searchQuery.trim().length > 0;
+  const activeFilterCount = [filters.category, filters.gender, filters.size]
+    .filter((value) => value !== null && value !== undefined && value !== '')
+    .length;
+  const searchResults = useMemo(
+    () =>
+      filterProducts(currentProducts, {
+        ...filters,
+        query: searchQuery,
+      }),
+    [currentProducts, filters, searchQuery],
+  );
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Kabin</Text>
-      {feedIsPersonalized && visibleSlots.length > 0 ? (
-        <View style={styles.personalizedBadge} pointerEvents="none">
-          <Sparkles color={colors.accentDark} size={12} />
-          <Text style={styles.personalizedBadgeText}>Sana özel sıralandı</Text>
+      <View style={styles.header}>
+        <View style={styles.searchBar}>
+          <Search color={colors.icon} size={18} />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Marka, ürün veya stil ara..."
+            placeholderTextColor={colors.placeholder}
+            style={styles.searchInput}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="search"
+            accessibilityLabel="Ürün ara"
+          />
+          <View style={styles.searchDivider} />
+          <PressableScale
+            onPress={() => setIsFilterOpen(true)}
+            style={styles.filterHit}
+            accessibilityRole="button"
+            accessibilityLabel="Filtreler"
+          >
+            <SlidersHorizontal color={colors.icon} size={18} />
+            {activeFilterCount > 0 ? <View style={styles.filterDot} /> : null}
+          </PressableScale>
         </View>
-      ) : null}
-      {isLoading ? (
-        <LoadingFeed />
-      ) : isCatalogExhausted ? (
-        <DeckFinishedCard
-          subtitle="Katalogdaki her şeyi gördün. Yeni ürünler eklendikçe burada belirir."
-          onRefresh={reloadFeed}
-          onOpenLiked={handleOpenLiked}
-        />
-      ) : visibleSlots.length === 0 ? (
-        <DeckFinishedCard
-          subtitle="Beğendiğin parçalar dolabına eklendi. Yeni öneriler yakında."
-          onRefresh={reloadFeed}
-          onOpenLiked={handleOpenLiked}
-        />
-      ) : (
-        <View style={styles.deck}>
-          {visibleSlots.map(({ product, depth }) => (
-            <StackSlot
-              key={product.id}
-              product={product}
-              depth={depth}
-              isTop={depth === 0}
-              canLike={canLike}
-              onSwipeRight={handleSwipeRight}
-              onSwipeLeft={handleSwipeLeft}
-              onVirtualTryOn={handleVirtualTryOn}
-              onBuy={handleBuy}
-              onRequireAuth={handleRequireAuth}
+      </View>
+      <View style={styles.body}>
+        {isSearching ? (
+          <View style={styles.searchResults}>
+            <SearchResults
+              products={searchResults}
+              onAdd={handleSwipeRight}
+              onOpenStore={handleBuy}
             />
-          ))}
-        </View>
-      )}
-      {hintStatus === 'visible' && !isLoading && visibleSlots.length > 0 ? (
+          </View>
+        ) : isLoading ? (
+          <LoadingFeed />
+        ) : isCatalogExhausted ? (
+          <DeckFinishedCard
+            subtitle="Katalogdaki her şeyi gördün. Yeni ürünler eklendikçe burada belirir."
+            onRefresh={reloadFeed}
+            onOpenLiked={handleOpenLiked}
+          />
+        ) : visibleSlots.length === 0 ? (
+          <DeckFinishedCard
+            subtitle="Beğendiğin parçalar dolabına eklendi. Yeni öneriler yakında."
+            onRefresh={reloadFeed}
+            onOpenLiked={handleOpenLiked}
+          />
+        ) : (
+          <View style={styles.deck}>
+            {visibleSlots.map(({ product, depth }) => (
+              <StackSlot
+                key={product.id}
+                product={product}
+                depth={depth}
+                isTop={depth === 0}
+                canLike={canLike}
+                onSwipeRight={handleSwipeRight}
+                onSwipeLeft={handleSwipeLeft}
+                onVirtualTryOn={handleVirtualTryOn}
+                onBuy={handleBuy}
+                onRequireAuth={handleRequireAuth}
+              />
+            ))}
+          </View>
+        )}
+      </View>
+      {hintStatus === 'visible' &&
+      !isLoading &&
+      !isSearching &&
+      visibleSlots.length > 0 ? (
         <SwipeHintOverlay onDismiss={handleDismissHint} />
       ) : null}
+      <FilterSheet
+        visible={isFilterOpen}
+        filters={filters}
+        onClose={() => setIsFilterOpen(false)}
+        onApply={setFilters}
+      />
       <VirtualTryOnModal
         visible={tryOnProduct !== null}
         product={tryOnProduct}
@@ -352,50 +414,83 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bgSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 28,
+    paddingTop: 52,
   },
   header: {
-    position: 'absolute',
-    top: 56,
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    color: colors.text,
+    paddingHorizontal: spacing.lg,
   },
-  personalizedBadge: {
-    position: 'absolute',
-    top: 62,
-    right: spacing.lg,
+  searchBar: {
+    width: '100%',
+    height: layout.headerControl,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.accentSoft,
-    borderRadius: radius.chip,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
+    gap: spacing.sm,
+    backgroundColor: colors.input,
+    borderRadius: radius.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingLeft: spacing.md,
+    paddingRight: spacing.xs,
+    marginBottom: 0,
+    zIndex: 6,
+    ...shadows.input,
   },
-  personalizedBadgeText: {
-    color: colors.accentDark,
-    fontSize: 11,
-    fontWeight: '700',
+  searchInput: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 15,
+    paddingVertical: 0,
+  },
+  searchDivider: {
+    width: 1,
+    height: SEARCH_DIVIDER_HEIGHT,
+    backgroundColor: colors.border,
+  },
+  filterHit: {
+    width: FILTER_HIT_SIZE,
+    height: FILTER_HIT_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterDot: {
+    position: 'absolute',
+    top: spacing.xs,
+    right: spacing.xs,
+    width: layout.filterDot,
+    height: layout.filterDot,
+    borderRadius: layout.filterDot / 2,
+    backgroundColor: colors.accent,
+  },
+  body: {
+    flex: 1,
+    width: '100%',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: DECK_VERTICAL_PADDING,
+    justifyContent: 'center',
+  },
+  searchResults: {
+    flex: 1,
+    alignSelf: 'stretch',
   },
   deck: {
-    width: SWIPE_CARD_WIDTH,
-    height: SWIPE_CARD_HEIGHT,
-    alignItems: 'center',
+    flex: 1,
+    width: '100%',
     justifyContent: 'center',
   },
   stackSlot: {
     position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
   },
   emptyState: {
     alignItems: 'center',
     paddingHorizontal: spacing.xxl,
   },
   finishedCard: {
-    width: SWIPE_CARD_WIDTH,
+    width: '100%',
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderRadius: radius.card,

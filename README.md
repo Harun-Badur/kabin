@@ -194,14 +194,9 @@ kamera ya da mikrofon kullanmıyor. Bu listeyi genişletmeden önce Play Console
 
 ### Marka varlıkları
 
-`assets/` altındaki simge ve splash görselleri Kabin lacivertiyle (`#0F172A`)
-üretilmiş **placeholder**'lardır. Yayın öncesi tasarımcı çıktısıyla
-değiştirilmeli; boyutlar korunmalı (`icon.png` 1024×1024,
-`android-icon-foreground.png` 1024×1024 saydam, `notification-icon.png` 96×96
-beyaz silüet + saydam). Uygulama light temaya geçtiği hâlde splash ve simge
-zeminleri lacivert kaldı: mevcut silüetler beyaz olduğu için zemin beyaza
-çekilirse görünmez oluyor. Beyaz splash'e geçiş, mercan/antrasit logo çıktısıyla
-birlikte yapılmalı.
+`assets/` altındaki simge mercan zeminde (`#FE382B`) beyaz **K**; splash
+sıcak kırık beyaz zeminde (`#F7F4F0`) mercan K. Boyutlar: `icon.png` 1024×1024,
+`android-icon-foreground.png` 1024×1024, `notification-icon.png` bildirim glifi.
 
 ## Tasarım sistemi
 
@@ -211,10 +206,11 @@ kullanılmaz. Palet "Beyaz Taban + Mercan Aksan" 60-30-10 dengesine dayanır:
 
 | Token | Değer | Kullanım |
 |-------|-------|----------|
-| `colors.bg` / `bgSoft` | `#FFFFFF` / `#FAFAFA` | Kart zemini / ekran zemini |
+| `colors.bg` / `surface` | `#F7F4F0` / `#F5F3EF` | Canvas / kart zemini |
 | `colors.text` / `textSecondary` | `#111827` / `#6B7280` | Başlık / yardımcı metin |
-| `colors.border` / `hairline` | `#E5E7EB` / `#F3F4F6` | Kart kenarı / ayırıcı |
-| `colors.accent` | `#FE382B` | Birincil CTA, aktif sekme, "BEĞEN" |
+| `colors.border` / `hairline` | `#EAE6E1` / `#F3F4F6` | Kart kenarı / ayırıcı |
+| `colors.accent` | `#FE382B` | Birincil CTA, aktif sekme, "MAĞAZAYA" |
+| `colors.stampAdd` / `stampPass` | `#22C55E` / `#EF4444` | "EKLE" / "GEÇ" damgaları |
 | `colors.accentDark` | `#D92B1F` | Küçük metin, link, indirim rozeti yazısı |
 | `colors.accentSoft` | `rgba(254,56,43,0.1)` | Rozet ve switch zemini |
 | `colors.tabInactive` | `#9CA3AF` | Pasif sekme |
@@ -244,12 +240,12 @@ kabin/
 ├── index.ts                # polyfill'ler + expo-router/entry
 ├── app.json                # Expo adı: Kabin
 ├── app/                    # router: dosya = route
-│   ├── _layout.tsx         # kök Stack + auth gate (Stack.Protected)
+│   ├── _layout.tsx         # kök Stack + onboarding + auth gate
 │   ├── auth.tsx            # oturum yoksa buraya düşer
 │   └── (tabs)/
-│       ├── _layout.tsx     # Keşfet / Beğenilenler / Profil
+│       ├── _layout.tsx     # Keşfet / Dolap / Profil
 │       ├── index.tsx       # Keşfet (swipe feed)
-│       ├── liked.tsx       # Beğenilenler
+│       ├── liked.tsx       # Dolabım
 │       └── profile.tsx     # Profil + hesap silme
 ├── components/
 │   ├── SwipeCard.tsx

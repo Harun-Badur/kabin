@@ -7,6 +7,7 @@ import type {
   FeedProductRow,
   FeedProvider,
   Product,
+  ProductColor,
 } from '../types/product';
 import type { ScoredProduct, UserPreferences } from '../types/recommendation';
 import type { GarmentCategory } from '../types/vton';
@@ -88,6 +89,42 @@ const toPrice = (value: number | string): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const isProductColor = (value: unknown): value is ProductColor => {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+  const item = value as Record<string, unknown>;
+  return typeof item.name === 'string' && typeof item.hex === 'string';
+};
+
+const parseColors = (value: unknown): ProductColor[] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const parsed = value.filter(isProductColor);
+  return parsed.length > 0 ? parsed : undefined;
+};
+
+const parseSizes = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const parsed = value.filter(
+    (item): item is string => typeof item === 'string' && item.trim().length > 0,
+  );
+  return parsed.length > 0 ? parsed : undefined;
+};
+
+const isUnknownRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const readRowField = (row: FeedProductRow, key: 'colors' | 'sizes'): unknown => {
+  if (!isUnknownRecord(row)) {
+    return undefined;
+  }
+  return row[key];
+};
+
 const mapFeedRow = (row: FeedProductRow): Product | null => {
   if (!isGarmentCategory(row.category) || !isFeedProvider(row.provider)) {
     return null;
@@ -122,6 +159,8 @@ const mapFeedRow = (row: FeedProductRow): Product | null => {
     productUrl,
     affiliateUrl,
     externalId: row.external_id,
+    colors: parseColors(readRowField(row, 'colors')),
+    sizes: parseSizes(readRowField(row, 'sizes')),
   };
 };
 
@@ -206,7 +245,7 @@ export const fetchFeedProducts = async (
     const { data, error } = await client
       .from('products')
       .select(
-        'id, provider, external_id, title, brand, price, current_price, previous_price, last_price_checked_at, currency, image_url, product_url, category, affiliate_url',
+        'id, provider, external_id, title, brand, price, current_price, previous_price, last_price_checked_at, currency, image_url, product_url, category, affiliate_url, colors, sizes',
       )
       .limit(Math.max(limit * FETCH_POOL_MULTIPLIER, limit));
 
@@ -249,4 +288,80 @@ export const fetchFeedProducts = async (
     });
     return { products: MOCK_PRODUCTS, source: 'mock', isPersonalized: false };
   }
+};
+
+export type ProductGender = 'women' | 'men' | 'unisex';
+
+export interface ProductFilters {
+  query?: string;
+  category?: GarmentCategory | null;
+  gender?: ProductGender | null;
+  size?: string | null;
+}
+
+const GENDER_MEN_TOKENS = ['erkek', 'oğlan', 'oglan'] as const;
+const GENDER_WOMEN_TOKENS = ['kadın', 'kadin', 'kız', 'kiz'] as const;
+
+const titleHasToken = (title: string, token: string): boolean => {
+  const haystack = title.toLocaleLowerCase('tr-TR');
+  const needle = token.toLocaleLowerCase('tr-TR');
+  const start = haystack.indexOf(needle);
+  if (start < 0) {
+    return false;
+  }
+  const before = start === 0 ? '' : haystack[start - 1];
+  const afterIndex = start + needle.length;
+  const after = afterIndex >= haystack.length ? '' : haystack[afterIndex];
+  const isBoundary = (char: string): boolean =>
+    char.length === 0 || /[^a-z0-9ğüşöçı]/i.test(char);
+  return isBoundary(before ?? '') && isBoundary(after ?? '');
+};
+
+export const inferGenderFromTitle = (title: string): ProductGender => {
+  if (GENDER_MEN_TOKENS.some((token) => titleHasToken(title, token))) {
+    return 'men';
+  }
+  if (GENDER_WOMEN_TOKENS.some((token) => titleHasToken(title, token))) {
+    return 'women';
+  }
+  return 'unisex';
+};
+
+const normalizeSearch = (value: string): string =>
+  value.trim().toLocaleLowerCase('tr-TR');
+
+export const filterProducts = (
+  products: Product[],
+  filters: ProductFilters,
+): Product[] => {
+  const query = filters.query ? normalizeSearch(filters.query) : '';
+  const category = filters.category ?? null;
+  const gender = filters.gender ?? null;
+  const size = filters.size?.trim() ?? null;
+
+  return products.filter((product) => {
+    if (query.length > 0) {
+      const haystack = `${product.brand} ${product.title}`;
+      if (!normalizeSearch(haystack).includes(query)) {
+        return false;
+      }
+    }
+
+    if (category !== null && product.category !== category) {
+      return false;
+    }
+
+    if (gender !== null && inferGenderFromTitle(product.title) !== gender) {
+      return false;
+    }
+
+    if (size !== null) {
+      const sizes = product.sizes ?? [];
+      if (!sizes.includes(size)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
 };

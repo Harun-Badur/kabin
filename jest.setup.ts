@@ -4,3 +4,20 @@ jest.mock('@sentry/react-native', () => ({
   captureMessage: jest.fn(),
   wrap: (value: unknown) => value,
 }));
+
+jest.mock('@react-native-async-storage/async-storage', () => {
+  const store = new Map<string, string>();
+  return {
+    setItem: jest.fn(async (key: string, value: string) => {
+      store.set(key, value);
+    }),
+    getItem: jest.fn(async (key: string) => store.get(key) ?? null),
+    removeItem: jest.fn(async (key: string) => {
+      store.delete(key);
+    }),
+    clear: jest.fn(async () => {
+      store.clear();
+    }),
+  };
+});
+

@@ -26,6 +26,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { ImageIcon, RotateCcw, Sparkles, X } from 'lucide-react-native';
 import PressableScale from './PressableScale';
+import SkeletonShimmer from './SkeletonShimmer';
 import { grantVtonConsent, hasVtonConsent } from '../lib/consent';
 import { hapticSuccess } from '../lib/haptics';
 import { logger } from '../lib/logger';
@@ -46,8 +47,17 @@ import type { TryOnStatus } from '../types/vton';
 
 const IMAGE_MAX_WIDTH = 768;
 const ICON_SIZE = 16;
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_CLOSE_DURATION_MS = 220;
+const LOADING_MESSAGES = [
+  'Kombinin hazırlanıyor...',
+  'Kıyafet giydiriliyor...',
+] as const;
+const LOADING_MESSAGE_INTERVAL_MS = 2500;
+const SLOW_HINT_AFTER_MS = 20_000;
+const SLOW_HINT_TEXT = 'İlk deneme biraz uzun sürebilir';
+const LOADING_SHIMMER_WIDTH = SCREEN_WIDTH - spacing.xl * 2;
+const LOADING_SHIMMER_HEIGHT = 160;
 
 type ConsentStatus = 'checking' | 'required' | 'granted';
 
@@ -70,6 +80,8 @@ export default function VirtualTryOnModal({
   const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
   const [consentStatus, setConsentStatus] = useState<ConsentStatus>('checking');
   const [isRendered, setIsRendered] = useState(visible);
+  const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
+  const [showSlowHint, setShowSlowHint] = useState(false);
 
   const lastProductRef = useRef(product);
   if (product) {
@@ -111,6 +123,28 @@ export default function VirtualTryOnModal({
 
     pulse.value = withTiming(0.55, { duration: 200 });
   }, [pulse, status]);
+
+  useEffect(() => {
+    if (status !== 'loading') {
+      setLoadingMessageIndex(0);
+      setShowSlowHint(false);
+      return;
+    }
+
+    const rotateId = setInterval(() => {
+      setLoadingMessageIndex(
+        (current) => (current + 1) % LOADING_MESSAGES.length,
+      );
+    }, LOADING_MESSAGE_INTERVAL_MS);
+    const slowHintId = setTimeout(() => {
+      setShowSlowHint(true);
+    }, SLOW_HINT_AFTER_MS);
+
+    return () => {
+      clearInterval(rotateId);
+      clearTimeout(slowHintId);
+    };
+  }, [status]);
 
   // withRepeat sonsuz döngüde; unmount'ta iptal edilmezse worklet çalışmaya
   // devam eder ve shared value sızar.
@@ -461,14 +495,22 @@ export default function VirtualTryOnModal({
         <View style={styles.body}>
           {status === 'loading' ? (
             <View style={styles.centerBlock}>
+              <SkeletonShimmer
+                width={LOADING_SHIMMER_WIDTH}
+                height={LOADING_SHIMMER_HEIGHT}
+                borderRadius={radius.card}
+              />
               <Animated.View style={[styles.loadingOrb, pulseStyle]}>
                 <Sparkles color={colors.accent} size={36} />
               </Animated.View>
-              <ActivityIndicator color={colors.accent} style={styles.spinner} />
               <Text style={styles.loadingText}>
-                AI seni giydiriyor... (ilk deneme 1-2 dk sürebilir)
+                {LOADING_MESSAGES[loadingMessageIndex]}
               </Text>
-              <Text style={styles.hint}>{displayProduct.brand}</Text>
+              {showSlowHint ? (
+                <Text style={styles.slowHint}>{SLOW_HINT_TEXT}</Text>
+              ) : (
+                <Text style={styles.hint}>{displayProduct.brand}</Text>
+              )}
             </View>
           ) : null}
 
@@ -748,6 +790,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: spacing.lg,
     marginBottom: 18,
   },
   spinner: {
@@ -765,6 +808,14 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: spacing.sm,
     fontSize: 14,
+  },
+  slowHint: {
+    color: colors.textSecondary,
+    marginTop: spacing.md,
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: spacing.lg,
   },
   errorTitle: {
     color: colors.text,
