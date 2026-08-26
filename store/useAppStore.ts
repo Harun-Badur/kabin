@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { MOCK_PRODUCTS } from '../data/mockProducts';
 import { logger } from '../lib/logger';
+import { track } from '../lib/analytics';
+import { recordSessionProductAction, resetSessionIntent } from '../lib/sessionIntent';
+import { setLastFeedMode } from '../lib/recsFeedState';
 import {
   fetchFeedProducts,
   type FeedSource,
@@ -14,6 +17,8 @@ import {
   updateLikedProductAlert,
 } from '../services/likeService';
 import type { LikedProduct, Product } from '../types/product';
+import type { FeedMode } from '../types/recommendation';
+import { DEFAULT_FEED_MODE } from '../types/recommendation';
 
 export type FeedStatus = 'idle' | 'loading' | 'error' | 'success';
 export type SessionSyncStatus = 'idle' | 'loading' | 'error' | 'success';
@@ -28,16 +33,20 @@ interface AppState {
   currentProducts: Product[];
   likedProducts: LikedProduct[];
   passedProductIds: string[];
+  passedStack: Product[];
   feedStatus: FeedStatus;
   feedSource: FeedSource | null;
   feedIsPersonalized: boolean;
+  feedMode: FeedMode;
   sessionUserId: string | null;
   sessionSyncStatus: SessionSyncStatus;
   loadFeed: (userId: string | null) => Promise<void>;
+  setFeedMode: (mode: FeedMode) => void;
   hydrateSession: (userId: string) => Promise<void>;
   resetSession: () => void;
   swipeRight: (product: Product) => void;
   swipeLeft: (product: Product) => void;
+  undoPass: () => boolean;
   unlikeProduct: (productId: string) => Promise<void>;
   updateLikeAlert: (productId: string, patch: LikeAlertPatch) => Promise<void>;
   refreshLikedProducts: () => Promise<void>;
@@ -99,6 +108,24 @@ const appendUniqueId = (ids: string[], productId: string): string[] => {
   return [...ids, productId];
 };
 
+const pushPassedProduct = (stack: Product[], product: Product): Product[] => {
+  const without = stack.filter((item) => item.id !== product.id);
+  return [...without, product];
+};
+
+const popPassedProduct = (
+  stack: Product[],
+): { stack: Product[]; product: Product | null } => {
+  if (stack.length === 0) {
+    return { stack, product: null };
+  }
+  const product = stack[stack.length - 1];
+  if (product === undefined) {
+    return { stack: [], product: null };
+  }
+  return { stack: stack.slice(0, -1), product };
+};
+
 const excludeSeen = (
   products: Product[],
   likedProducts: LikedProduct[],
@@ -115,9 +142,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentProducts: [],
   likedProducts: [],
   passedProductIds: [],
+  passedStack: [],
   feedStatus: 'idle',
   feedSource: null,
   feedIsPersonalized: false,
+  feedMode: DEFAULT_FEED_MODE,
   sessionUserId: null,
   sessionSyncStatus: 'idle',
   // userId çağıran ekrandan geçer: feed effect'i kök layout'un hidrasyonundan
@@ -125,7 +154,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   loadFeed: async (userId: string | null): Promise<void> => {
     set({ feedStatus: 'loading' });
     try {
-      const result = await fetchFeedProducts(FEED_LIMIT, userId);
+      const result = await fetchFeedProducts(FEED_LIMIT, userId, get().feedMode);
       logger.debug('Feed yüklendi', {
         source: result.source,
         isPersonalized: result.isPersonalized,
@@ -154,6 +183,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       }));
     }
   },
+  setFeedMode: (mode: FeedMode): void => {
+    setLastFeedMode(mode);
+    set({ feedMode: mode });
+  },
   hydrateSession: async (userId: string): Promise<void> => {
     set({ sessionUserId: userId, sessionSyncStatus: 'loading' });
     try {
@@ -177,13 +210,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
   resetSession: (): void => {
+    setLastFeedMode(DEFAULT_FEED_MODE);
     set({
       sessionUserId: null,
       sessionSyncStatus: 'idle',
       likedProducts: [],
       passedProductIds: [],
+      passedStack: [],
       feedIsPersonalized: false,
+      feedMode: DEFAULT_FEED_MODE,
     });
+    resetSessionIntent();
   },
   swipeRight: (product: Product): void => {
     const userId = get().sessionUserId;
@@ -194,6 +231,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       passedProductIds: state.passedProductIds.filter(
         (id) => id !== product.id,
       ),
+      passedStack: state.passedStack.filter((item) => item.id !== product.id),
     }));
 
     if (!userId) {
@@ -202,6 +240,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
       return;
     }
+
+    track('like', product.id, { source: 'feed' });
+    track('dolap_add', product.id, { source: 'feed' });
+    recordSessionProductAction('like', product);
+    recordSessionProductAction('dolap_add', product);
 
     void insertLikedProduct(userId, product).catch((error: unknown) => {
       logger.error('Beğeni yazılamadı, geri alınıyor', {
@@ -220,11 +263,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       currentProducts: removeProduct(state.currentProducts, product.id),
       passedProductIds: appendUniqueId(state.passedProductIds, product.id),
+      passedStack: pushPassedProduct(state.passedStack, product),
     }));
 
     if (!userId) {
       return;
     }
+
+    track('pass', product.id, { source: 'feed' });
+    recordSessionProductAction('pass', product);
 
     void insertPassedProduct(userId, product).catch((error: unknown) => {
       logger.error('Geçme yazılamadı, geri alınıyor', {
@@ -236,8 +283,23 @@ export const useAppStore = create<AppState>((set, get) => ({
         passedProductIds: state.passedProductIds.filter(
           (id) => id !== product.id,
         ),
+        passedStack: state.passedStack.filter((item) => item.id !== product.id),
       }));
     });
+  },
+  undoPass: (): boolean => {
+    const { stack, product } = popPassedProduct(get().passedStack);
+    if (product === null) {
+      return false;
+    }
+
+    set((state) => ({
+      currentProducts: restoreProduct(state.currentProducts, product),
+      passedProductIds: state.passedProductIds.filter((id) => id !== product.id),
+      passedStack: stack,
+    }));
+
+    return true;
   },
   unlikeProduct: async (productId: string): Promise<void> => {
     const { likedProducts, sessionUserId: userId } = get();

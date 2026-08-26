@@ -48,6 +48,9 @@ import { useAuthContext } from '../hooks/useAuthContext';
 import { grantVtonConsent, hasVtonConsent } from '../lib/consent';
 import { hapticSuccess } from '../lib/haptics';
 import { logger } from '../lib/logger';
+import { track } from '../lib/analytics';
+import { recordSessionProductAction } from '../lib/sessionIntent';
+import { LEGACY_RECOMMENDATION_ID } from '../types/analytics';
 import {
   CONSENT_ENTER_DURATION_MS,
   HERO_GROW_DURATION_MS,
@@ -583,6 +586,11 @@ export default function VirtualTryOnModal({
     setStatus('loading');
     setErrorMessage(resetMessage);
 
+    const startedAt = Date.now();
+    track('try_on_start', product.id, {
+      recommendation_id: LEGACY_RECOMMENDATION_ID,
+    });
+
     try {
       const outputUrl = await tryOnGarment(personImageUri, product.imageUrl, {
         garmentDescription: product.garmentDescription,
@@ -595,6 +603,13 @@ export default function VirtualTryOnModal({
       setResultImageUrl(outputUrl);
       setStatus('success');
       hapticSuccess();
+      track('try_on_success', product.id, {
+        result_shown: true,
+        before_after_used: false,
+        saved: isInCloset,
+        duration_ms: Date.now() - startedAt,
+      });
+      recordSessionProductAction('try_on_success', product);
     } catch (error) {
       const message =
         error instanceof VtonServiceError
@@ -604,8 +619,11 @@ export default function VirtualTryOnModal({
       setStatus('error');
       setErrorMessage(message);
       Alert.alert('Sanal deneme hatası', message);
+      track('try_on_failure', product.id, {
+        error_reason: message.slice(0, 120),
+      });
     }
-  }, [personImageUri, product]);
+  }, [isInCloset, personImageUri, product]);
 
   const handleRetry = useCallback((): void => {
     setStatus('idle');
@@ -620,6 +638,7 @@ export default function VirtualTryOnModal({
     }
     try {
       await Share.share({ message: buildTryOnShareMessage(displayProduct) });
+      track('share', displayProduct.id, { source: 'tryon' });
     } catch (error) {
       logger.error('Sanal deneme paylaşılamadı', { error });
     }
@@ -658,6 +677,7 @@ export default function VirtualTryOnModal({
       });
       setClosetAdded(true);
       showToast('Dolabına eklendi');
+      track('dolap_add', displayProduct.id, { source: 'tryon' });
     } catch (error) {
       logger.error('Dolaba eklenemedi', { error });
       showToast('Dolaba eklenemedi. Tekrar dene.');

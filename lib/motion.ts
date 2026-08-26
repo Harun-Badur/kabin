@@ -1,3 +1,5 @@
+import { CARD_SHADOW_SPREAD_PX } from './theme';
+
 /** Ortak süreler: JS thread’de interpolasyon yok, hepsi Reanimated worklet’e gider. */
 export const PRESS_SCALE = 0.95;
 export const PRESS_DURATION_MS = 100;
@@ -5,19 +7,150 @@ export const PRESS_DURATION_MS = 100;
 export const TAB_TRANSITION_MS = 200;
 export const STACK_TRANSITION_MS = 200;
 
-/** Deste hissi: aktif kartın arkasındaki iki kartın derinlik basamakları. */
+/** Deste hissi: önde 1 baskın kart + 1 hafif peek; 2. arka kart mount kalır, görünmez. */
 export const DECK_VISIBLE_COUNT = 3;
-export const DECK_SCALE_BY_DEPTH = [1, 0.95, 0.9] as const;
-export const DECK_TRANSLATE_Y_BY_DEPTH = [0, 12, 24] as const;
-export const DECK_OPACITY_BY_DEPTH = [1, 0.7, 0.45] as const;
-export const DECK_SPRING = { damping: 16, stiffness: 160 } as const;
+export const DECK_SCALE_BY_DEPTH = [1, 0.98, 0.96];
+/** Tek görünür arka kartın alt kenar payı. */
+export const DECK_PEEK_STEP_PX = 4;
+/** Ana kart opak; peek sakin; rezerv gizli. */
+export const DECK_OPACITY_BY_DEPTH = [1, 0.7, 0];
+export const DECK_SPRING = { damping: 18, stiffness: 200, mass: 0.7 } as const;
+/** Promotion: kısa, overshoot yok — “yeni kart doğdu” hissi yok. */
+export const DECK_PROMOTE_SPRING = {
+  damping: 28,
+  stiffness: 240,
+  mass: 0.72,
+  overshootClamping: true,
+} as const;
+
+/** Discover kart fiziği: yalnızca dikey drag, rotation yok, overshoot yok. */
+export const PASS_DISTANCE_PX = 84;
+export const PASS_VELOCITY_PX = 920;
+export const UNDO_DISTANCE_PX = 84;
+export const UNDO_VELOCITY_PX = 920;
+/** Pan yalnız bu Y eşiği aşılınca açılır; yatay/çapraz sürükleme hiç aktive etmez. */
+export const PAN_ACTIVE_OFFSET_Y_PX = 18;
+/**
+ * Bu X eşiği Y’den önce aşılırsa jest iptal: sağ/sol kartı kıpırdatmaz.
+ * Y biraz daha erken açılır ki hafif çaprazda yalnız dikey 1:1 kalsın.
+ */
+export const PAN_FAIL_OFFSET_X_PX = 40;
+export const CARD_SPRING_BACK = {
+  damping: 24,
+  stiffness: 280,
+  mass: 0.7,
+  overshootClamping: true,
+} as const;
+export const CARD_THROW_SPRING = {
+  damping: 15,
+  stiffness: 78,
+  mass: 0.85,
+  overshootClamping: true,
+} as const;
+export const UNDO_SETTLE_SPRING = {
+  damping: 20,
+  stiffness: 210,
+  mass: 0.75,
+  overshootClamping: true,
+} as const;
+
+export interface StackPose {
+  scale: number;
+  translateY: number;
+  opacity: number;
+}
+
+/**
+ * Destenin TEK geometri kaynağı. JS thread’de çalışır (worklet değil): Reanimated 4
+ * `as const`/dinamik dizi indeksini UI thread’e kopyalayamaz, açılışta çöker.
+ */
+export const getStackPose = (depth: number, cardHeightPx: number): StackPose => {
+  const step = depth <= 0 ? 0 : depth >= 2 ? 2 : 1;
+  const scale = step === 0 ? 1 : step === 1 ? 0.98 : 0.96;
+  const opacity = step === 0 ? 1 : step === 1 ? 0.7 : 0;
+  const shrinkCompensation = ((1 - scale) * cardHeightPx) / 2;
+  const peek = step === 1 ? DECK_PEEK_STEP_PX : 0;
+  return {
+    scale,
+    translateY: peek + shrinkCompensation,
+    opacity,
+  };
+};
+
+/**
+ * Idle park: kart, deck clip üst kenarının tamamen dışında durur.
+ * 24px minimum boşluk + gölge yayılımı; tahmin/layout sapması şerit bırakmaz.
+ */
+export const UNDO_PARK_CLEARANCE_PX = 24;
+
+/** Park = -(kart yüksekliği + clearance + gölge). Gesture eşiğine dokunulmaz. */
+export const deckClearTravelPx = (cardHeightPx: number): number =>
+  cardHeightPx + UNDO_PARK_CLEARANCE_PX + CARD_SHADOW_SPREAD_PX;
+
+/**
+ * Geçilen kart unmount edilmez; clip'in hemen üstünde park eder. Görünürlüğü
+ * opacity değil yalnızca geometri belirler.
+ */
+export const getUndoParkY = (cardHeightPx: number): number =>
+  -deckClearTravelPx(cardHeightPx);
+
+/** JS thread lerp — Reanimated `interpolate` worklet’ini useLayoutEffect’te çağırma. */
+export const lerp = (from: number, to: number, progress: number): number =>
+  from + (to - from) * progress;
+
+/** Yukarı sürükleme oranı: GEÇ damgası ve arka kartın öne gelişi bunu izler. */
+export const passProgress = (translationY: number): number => {
+  'worklet';
+  if (translationY >= 0) {
+    return 0;
+  }
+  return Math.min(-translationY / PASS_DISTANCE_PX, 1);
+};
+
+/**
+ * Park eden kartın desteye dönüş oranı. Ön kart aynı oranla arka slota iner,
+ * böylece iki hareket tek fiziksel devir gibi okunur.
+ */
+export const undoReturnProgress = (
+  pullY: number,
+  travelPx: number,
+): number => {
+  'worklet';
+  if (pullY <= 0 || travelPx <= 0) {
+    return 0;
+  }
+  return Math.min(pullY / travelPx, 1);
+};
+
+export const shouldCommitPass = (
+  translationY: number,
+  velocityY: number,
+): boolean => {
+  'worklet';
+  return translationY <= -PASS_DISTANCE_PX || velocityY <= -PASS_VELOCITY_PX;
+};
+
+export const shouldCommitUndo = (
+  translationY: number,
+  velocityY: number,
+): boolean => {
+  'worklet';
+  return translationY >= UNDO_DISTANCE_PX || velocityY >= UNDO_VELOCITY_PX;
+};
+
+/** Segment pill: kısa, overshoot yok. */
+export const SEGMENT_PILL_SPRING = {
+  damping: 24,
+  stiffness: 320,
+  mass: 0.6,
+  overshootClamping: true,
+} as const;
 
 export const HINT_ENTER_DURATION_MS = 260;
 export const HINT_EXIT_DURATION_MS = 180;
 export const HINT_BOB_DURATION_MS = 900;
 export const HINT_BOB_OFFSET_PX = 6;
 
-export const CARD_MAX_ROTATION_DEG = 15;
 export const CARD_SNAP_SCALE = 0.9;
 export const CARD_SNAP_DURATION_MS = 200;
 export const CARD_EXIT_DURATION_MS = 300;

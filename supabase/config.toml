@@ -9,3 +9,6 @@ verify_jwt = true
 
 [functions.delete-account]
 verify_jwt = true
+
+[functions.recs-feed]
+verify_jwt = true

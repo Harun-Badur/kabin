@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import { Dimensions, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   cancelAnimation,
-  Easing,
   Extrapolation,
   interpolate,
   runOnJS,
@@ -13,21 +12,32 @@ import Animated, {
   withSequence,
   withSpring,
   withTiming,
+  type SharedValue,
 } from 'react-native-reanimated';
 import { Heart, ShoppingBag, Sparkles, X } from 'lucide-react-native';
 import PressableScale from './PressableScale';
 import { hapticPurchaseIntent, hapticSwipeDecision } from '../lib/haptics';
 import { logger } from '../lib/logger';
 import {
-  CARD_EXIT_DURATION_MS,
-  CARD_EXIT_LIFT_PX,
-  CARD_MAX_ROTATION_DEG,
-  CARD_SNAP_DURATION_MS,
-  CARD_SNAP_SCALE,
-  PRESS_DURATION_MS,
-  PRESS_SCALE,
+  CARD_SPRING_BACK,
+  CARD_THROW_SPRING,
+  PAN_ACTIVE_OFFSET_Y_PX,
+  PAN_FAIL_OFFSET_X_PX,
+  UNDO_SETTLE_SPRING,
+  deckClearTravelPx,
+  passProgress,
+  shouldCommitPass,
+  shouldCommitUndo,
 } from '../lib/motion';
-import { colors, radius, shadows, spacing } from '../lib/theme';
+import { IMPRESSION_MIN_DWELL_MS } from '../types/analytics';
+import {
+  colors,
+  estimateDiscoverCardHeight,
+  layout,
+  radius,
+  shadows,
+  spacing,
+} from '../lib/theme';
 import {
   formatTryPrice,
   GARMENT_CATEGORY_LABEL,
@@ -39,28 +49,37 @@ import {
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const SWIPE_THRESHOLD_PX = 100;
-const SWIPE_UP_THRESHOLD_PX = 100;
-const EXIT_DISTANCE_PX = SCREEN_WIDTH * 1.35;
-const EXIT_UP_DISTANCE_PX = SCREEN_HEIGHT * 1.15;
-const PAN_MIN_DISTANCE_PX = 18;
-const EXIT_TIMING = { duration: CARD_EXIT_DURATION_MS } as const;
+const DOUBLE_TAP_MAX_DISTANCE_PX = 16;
+const DOUBLE_TAP_MAX_DURATION_MS = 280;
+const HEART_BURST_IN_MS = 160;
+const HEART_BURST_OUT_MS = 260;
+const HEART_BURST_PEAK_SCALE = 1.18;
+/** 0: slot reuse/reconcile sırasında expo-image crossfade flash'ini engeller. */
+const IMAGE_CROSSFADE_MS = 0;
 const ACTION_ICON_SIZE = 16;
+const REASON_ICON_SIZE = 12;
 /** object-position: top-center — tam boy kadraj (hedef oran ~0.68). */
 const IMAGE_CONTENT_POSITION = { top: 0, left: '50%' } as const;
-const CARD_HEIGHT_RATIO = 0.83;
 
 export type { Product };
 
 export interface SwipeCardProps {
   product: Product;
-  onSwipeRight: (product: Product) => void;
-  onSwipeLeft: (product: Product) => void;
+  onAddToCloset: (product: Product) => void;
+  onPass: (product: Product) => void;
+  onPassExitSettled?: (product: Product) => void;
   onVirtualTryOn: (product: Product) => void;
   onBuy: (product: Product) => void;
+  onUndoPass?: () => void;
   onRequireAuth?: () => void;
+  onImpression?: (product: Product, dwellMs: number) => void;
   isInteractive?: boolean;
+  isExiting?: boolean;
   canLike?: boolean;
+  canUndo?: boolean;
+  /** Park/çıkış kartında elevation clip dışına taşmasın. */
+  castShadow?: boolean;
+  deckPullY?: SharedValue<number>;
 }
 
 const formatPrice = (product: Product): string =>
@@ -68,49 +87,93 @@ const formatPrice = (product: Product): string =>
 
 export default function SwipeCard({
   product,
-  onSwipeRight,
-  onSwipeLeft,
+  onAddToCloset,
+  onPass,
+  onPassExitSettled,
   onVirtualTryOn,
   onBuy,
+  onUndoPass,
   onRequireAuth,
+  onImpression,
   isInteractive = true,
+  isExiting = false,
   canLike = true,
+  canUndo = false,
+  castShadow = true,
+  deckPullY,
 }: SwipeCardProps) {
   const [hasImageError, setHasImageError] = useState(false);
 
-  const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const cardScale = useSharedValue(1);
-  const cardOpacity = useSharedValue(1);
-  const buyScale = useSharedValue(1);
   const hasExited = useSharedValue(false);
+  const heartBurst = useSharedValue(0);
 
   useEffect(
     () => () => {
-      cancelAnimation(translateX);
       cancelAnimation(translateY);
       cancelAnimation(cardScale);
-      cancelAnimation(cardOpacity);
-      cancelAnimation(buyScale);
+      cancelAnimation(heartBurst);
     },
-    [buyScale, cardOpacity, cardScale, translateX, translateY],
+    [cardScale, heartBurst, translateY],
   );
 
-  const handleSwipeRight = useCallback((): void => {
+  useLayoutEffect(() => {
+    if (isExiting) {
+      return;
+    }
+    if (isInteractive) {
+      if (hasExited.value) {
+        hasExited.value = false;
+        translateY.value = withSpring(0, CARD_SPRING_BACK);
+      }
+      return;
+    }
+    // Peek/arka slot: çıkış yolunu dış sargı taşır; iç offset boyayıp double-park yapmasın.
+    translateY.value = 0;
+  }, [hasExited, isExiting, isInteractive, translateY]);
+
+  useEffect(() => {
+    if (!isInteractive || !onImpression) {
+      return;
+    }
+
+    const startedAt = Date.now();
+    let fired = false;
+    const fire = (): void => {
+      if (fired) {
+        return;
+      }
+      const dwellMs = Date.now() - startedAt;
+      if (dwellMs < IMPRESSION_MIN_DWELL_MS) {
+        return;
+      }
+      fired = true;
+      onImpression(product, dwellMs);
+    };
+
+    const timeoutId = setTimeout(fire, IMPRESSION_MIN_DWELL_MS);
+    return () => {
+      clearTimeout(timeoutId);
+      fire();
+    };
+  }, [isInteractive, onImpression, product]);
+
+  const handleAddToCloset = useCallback((): void => {
     try {
-      onSwipeRight(product);
+      onAddToCloset(product);
     } catch (error) {
       logger.error('Beğeni işlenemedi', { error, productId: product.id });
     }
-  }, [onSwipeRight, product]);
+  }, [onAddToCloset, product]);
 
-  const handleSwipeLeft = useCallback((): void => {
+  const handlePass = useCallback((): void => {
     try {
-      onSwipeLeft(product);
+      onPass(product);
     } catch (error) {
       logger.error('Geçme işlenemedi', { error, productId: product.id });
     }
-  }, [onSwipeLeft, product]);
+  }, [onPass, product]);
 
   const handleVirtualTryOn = useCallback((): void => {
     try {
@@ -142,197 +205,204 @@ export default function SwipeCard({
     }
   }, [onBuy, product]);
 
-  const finishBuyExit = useCallback((): void => {
-    handleBuy();
-    if (canLike) {
-      handleSwipeRight();
-    } else {
-      handleSwipeLeft();
+  const handleUndoPass = useCallback((): void => {
+    try {
+      onUndoPass?.();
+    } catch (error) {
+      logger.error('Geçme geri alınamadı', { error });
     }
-  }, [canLike, handleBuy, handleSwipeLeft, handleSwipeRight]);
+  }, [onUndoPass]);
 
-  const buyTapGesture = Gesture.Tap()
-    .enabled(isInteractive)
-    .maxDistance(12)
-    .onBegin(() => {
-      buyScale.value = withTiming(PRESS_SCALE, { duration: PRESS_DURATION_MS });
-    })
-    .onFinalize(() => {
-      buyScale.value = withTiming(1, { duration: PRESS_DURATION_MS });
-    })
-    .onEnd(() => {
-      runOnJS(hapticPurchaseIntent)();
-      runOnJS(handleBuy)();
-    });
+  const handleStorePress = useCallback((): void => {
+    hapticPurchaseIntent();
+    handleBuy();
+  }, [handleBuy]);
+
+  const finishDoubleTapLike = useCallback((): void => {
+    if (!canLike) {
+      handleRequireAuth();
+      return;
+    }
+    handleAddToCloset();
+  }, [canLike, handleAddToCloset, handleRequireAuth]);
+
+  const notifyEmptyUndo = useCallback((): void => {
+    hapticSwipeDecision();
+  }, []);
 
   const snapHome = (): void => {
     'worklet';
-    translateX.value = withSpring(0, { damping: 18, stiffness: 180 });
-    translateY.value = withSpring(0, { damping: 18, stiffness: 180 });
-    cardScale.value = withSequence(
-      withTiming(CARD_SNAP_SCALE, { duration: 0 }),
-      withTiming(1, {
-        duration: CARD_SNAP_DURATION_MS,
-        easing: Easing.out(Easing.back(1.8)),
-      }),
-    );
+    translateY.value = withSpring(0, CARD_SPRING_BACK);
+    if (deckPullY) {
+      deckPullY.value = withSpring(0, CARD_SPRING_BACK);
+    }
   };
 
-  const flyOut = (toX: number, toY: number, onDone: () => void): void => {
-    'worklet';
-    hasExited.value = true;
-    cardOpacity.value = withTiming(0, EXIT_TIMING);
-    cardScale.value = withTiming(0.92, EXIT_TIMING);
-    translateY.value = withTiming(toY, EXIT_TIMING);
-    translateX.value = withTiming(toX, EXIT_TIMING, (finished) => {
-      if (finished) {
-        runOnJS(onDone)();
-      }
-    });
-  };
+  const commitPass = useCallback((): void => {
+    handlePass();
+  }, [handlePass]);
 
+  const notifyPassExitSettled = useCallback((): void => {
+    onPassExitSettled?.(product);
+  }, [onPassExitSettled, product]);
+
+  const commitUndo = useCallback((): void => {
+    handleUndoPass();
+    translateY.value = 0;
+  }, [handleUndoPass, translateY]);
+
+  /**
+   * Y eksenine kilitli: yatay/çapraz sürüklemede pan hiç aktive olmaz, kart
+   * kıpırdamaz. Aşağı çekişte ön kart yerinde durur; parmağı takip eden kart
+   * clip üstünde park eden geçilmiş karttır (deckPullY üzerinden).
+   */
   const panGesture = Gesture.Pan()
     .enabled(isInteractive)
-    .minDistance(PAN_MIN_DISTANCE_PX)
+    .activeOffsetY([-PAN_ACTIVE_OFFSET_Y_PX, PAN_ACTIVE_OFFSET_Y_PX])
+    .failOffsetX([-PAN_FAIL_OFFSET_X_PX, PAN_FAIL_OFFSET_X_PX])
     .onUpdate((event) => {
       if (hasExited.value) {
         return;
       }
-
-      translateX.value = event.translationX;
-      translateY.value = event.translationY;
+      const y = event.translationY;
+      if (deckPullY) {
+        deckPullY.value = y < 0 || canUndo ? y : 0;
+      }
+      translateY.value = Math.min(y, 0);
     })
     .onEnd((event) => {
       if (hasExited.value) {
         return;
       }
 
-      if (event.translationY < -SWIPE_UP_THRESHOLD_PX) {
-        runOnJS(hapticPurchaseIntent)();
-        flyOut(event.translationX, -EXIT_UP_DISTANCE_PX, finishBuyExit);
+      const y = event.translationY;
+      const vy = event.velocityY;
+
+      if (shouldCommitPass(y, vy)) {
+        hasExited.value = true;
+        runOnJS(hapticSwipeDecision)();
+        runOnJS(commitPass)();
+        translateY.value = withSpring(
+          -DECK_CLEAR_TRAVEL_PX,
+          { ...CARD_THROW_SPRING, velocity: vy },
+          () => {
+            runOnJS(notifyPassExitSettled)();
+          },
+        );
         return;
       }
 
-      if (event.translationX > SWIPE_THRESHOLD_PX) {
-        if (!canLike) {
+      if (shouldCommitUndo(y, vy)) {
+        if (!canUndo) {
           snapHome();
-          runOnJS(handleRequireAuth)();
+          runOnJS(notifyEmptyUndo)();
           return;
         }
         runOnJS(hapticSwipeDecision)();
-        flyOut(
-          EXIT_DISTANCE_PX,
-          event.translationY - CARD_EXIT_LIFT_PX,
-          handleSwipeRight,
-        );
-        return;
-      }
-
-      if (event.translationX < -SWIPE_THRESHOLD_PX) {
-        runOnJS(hapticSwipeDecision)();
-        flyOut(
-          -EXIT_DISTANCE_PX,
-          event.translationY - CARD_EXIT_LIFT_PX,
-          handleSwipeLeft,
-        );
+        translateY.value = withSpring(0, UNDO_SETTLE_SPRING);
+        if (deckPullY) {
+          // Park eden kart tam dinlenme pozisyonuna oturunca rol devri görünmez olur.
+          deckPullY.value = withSpring(
+            DECK_CLEAR_TRAVEL_PX,
+            { ...UNDO_SETTLE_SPRING, velocity: vy },
+            (finished) => {
+              if (finished) {
+                runOnJS(commitUndo)();
+              }
+            },
+          );
+        } else {
+          runOnJS(commitUndo)();
+        }
         return;
       }
 
       snapHome();
     });
 
-  const animatedCardStyle = useAnimatedStyle(() => {
-    const rotate = interpolate(
-      translateX.value,
-      [-SCREEN_WIDTH / 2, 0, SCREEN_WIDTH / 2],
-      [-CARD_MAX_ROTATION_DEG, 0, CARD_MAX_ROTATION_DEG],
-      Extrapolation.CLAMP,
+  const playHeartThenLike = (): void => {
+    'worklet';
+    if (hasExited.value) {
+      return;
+    }
+    hasExited.value = true;
+    heartBurst.value = withSequence(
+      withTiming(1, { duration: HEART_BURST_IN_MS }),
+      withTiming(0, { duration: HEART_BURST_OUT_MS }, (finished) => {
+        if (finished) {
+          runOnJS(finishDoubleTapLike)();
+        }
+      }),
     );
+  };
 
+  const doubleTapGesture = Gesture.Tap()
+    .enabled(isInteractive)
+    .numberOfTaps(2)
+    .maxDuration(DOUBLE_TAP_MAX_DURATION_MS)
+    .maxDistance(DOUBLE_TAP_MAX_DISTANCE_PX)
+    .onEnd(() => {
+      if (hasExited.value) {
+        return;
+      }
+      runOnJS(hapticSwipeDecision)();
+      if (!canLike) {
+        runOnJS(handleRequireAuth)();
+        return;
+      }
+      playHeartThenLike();
+    });
+
+  const cardGesture = Gesture.Exclusive(doubleTapGesture, panGesture);
+  const ctaNativeGesture = Gesture.Native().blocksExternalGesture(
+    doubleTapGesture,
+    panGesture,
+  );
+
+  const animatedCardStyle = useAnimatedStyle(() => ({
+    opacity: 1,
+    transform: [
+      { translateY: translateY.value },
+      { scale: cardScale.value },
+    ],
+  }));
+
+  const passOverlayStyle = useAnimatedStyle(() => {
+    const progress = passProgress(translateY.value);
     return {
-      opacity: cardOpacity.value,
-      transform: [
-        { translateX: translateX.value },
-        { translateY: translateY.value },
-        { rotateZ: `${rotate}deg` },
-        { scale: cardScale.value },
-      ],
+      opacity: progress,
+      transform: [{ scale: 0.86 + 0.14 * progress }],
     };
   });
 
-  const likeOverlayStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      translateX.value,
-      [0, SWIPE_THRESHOLD_PX],
-      [0, 1],
-      Extrapolation.CLAMP,
-    ),
-    transform: [
-      {
-        scale: interpolate(
-          translateX.value,
-          [0, SWIPE_THRESHOLD_PX],
-          [0.86, 1],
-          Extrapolation.CLAMP,
-        ),
-      },
-    ],
-  }));
-
-  const passOverlayStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      translateX.value,
-      [0, -SWIPE_THRESHOLD_PX],
-      [0, 1],
-      Extrapolation.CLAMP,
-    ),
-    transform: [
-      {
-        scale: interpolate(
-          translateX.value,
-          [0, -SWIPE_THRESHOLD_PX],
-          [0.86, 1],
-          Extrapolation.CLAMP,
-        ),
-      },
-    ],
-  }));
-
-  const likeWashStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      translateX.value,
-      [0, SWIPE_THRESHOLD_PX],
-      [0, 1],
-      Extrapolation.CLAMP,
-    ),
-  }));
-
   const passWashStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      translateX.value,
-      [0, -SWIPE_THRESHOLD_PX],
-      [0, 1],
-      Extrapolation.CLAMP,
-    ),
+    opacity: passProgress(translateY.value),
   }));
 
-  const buyOverlayStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      translateY.value,
-      [0, -SWIPE_UP_THRESHOLD_PX],
-      [0, 1],
-      Extrapolation.CLAMP,
-    ),
+  const heartBurstStyle = useAnimatedStyle(() => ({
+    opacity: heartBurst.value,
+    transform: [
+      {
+        scale: interpolate(
+          heartBurst.value,
+          [0, 1],
+          [0.72, HEART_BURST_PEAK_SCALE],
+          Extrapolation.CLAMP,
+        ),
+      },
+    ],
   }));
 
-  const buyButtonStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: buyScale.value }],
-  }));
+  const reasonLabel = product.reason?.trim() ?? '';
 
   return (
-    <GestureDetector gesture={panGesture}>
+    <GestureDetector gesture={cardGesture}>
       <Animated.View
-        style={[styles.shadowWrap, animatedCardStyle]}
+        style={[
+          styles.shadowWrap,
+          !castShadow ? styles.shadowWrapParked : null,
+          animatedCardStyle,
+        ]}
         accessibilityRole="image"
         accessibilityLabel={`${product.brand} ${product.title}, ${formatPrice(product)}`}
       >
@@ -350,27 +420,15 @@ export default function SwipeCard({
                 contentPosition={IMAGE_CONTENT_POSITION}
                 cachePolicy="memory-disk"
                 recyclingKey={product.id}
-                transition={160}
+                transition={IMAGE_CROSSFADE_MS}
                 onError={() => setHasImageError(true)}
               />
             )}
 
             <Animated.View
               pointerEvents="none"
-              style={[styles.wash, styles.likeWash, likeWashStyle]}
-            />
-            <Animated.View
-              pointerEvents="none"
               style={[styles.wash, styles.passWash, passWashStyle]}
             />
-
-            <Animated.View
-              pointerEvents="none"
-              style={[styles.stamp, styles.likeStamp, likeOverlayStyle]}
-            >
-              <Heart color={colors.stampAdd} fill={colors.stampAdd} size={28} />
-              <Text style={styles.likeStampText}>EKLE</Text>
-            </Animated.View>
 
             <Animated.View
               pointerEvents="none"
@@ -382,11 +440,19 @@ export default function SwipeCard({
 
             <Animated.View
               pointerEvents="none"
-              style={[styles.stamp, styles.buyStamp, buyOverlayStyle]}
+              style={[styles.heartBurst, heartBurstStyle]}
             >
-              <ShoppingBag color={colors.accent} size={26} />
-              <Text style={styles.buyStampText}>MAĞAZAYA</Text>
+              <Heart color={colors.accent} fill={colors.accent} size={64} />
             </Animated.View>
+
+            {reasonLabel.length > 0 ? (
+              <View style={styles.reasonChip} pointerEvents="none">
+                <Sparkles color={colors.accent} size={REASON_ICON_SIZE} />
+                <Text style={styles.reasonChipText} numberOfLines={1}>
+                  {reasonLabel}
+                </Text>
+              </View>
+            ) : null}
 
             {isInteractive && !canLike ? (
               <PressableScale
@@ -455,27 +521,28 @@ export default function SwipeCard({
             </View>
 
             {isInteractive ? (
-              <View style={styles.actions}>
-                <PressableScale
-                  onPress={handleVirtualTryOn}
-                  style={styles.primaryAction}
-                  accessibilityRole="button"
-                  accessibilityLabel="Dene"
-                >
-                  <Sparkles color={colors.inverseText} size={ACTION_ICON_SIZE} />
-                  <Text style={styles.primaryActionText}>Dene</Text>
-                </PressableScale>
-                <GestureDetector gesture={buyTapGesture}>
-                  <Animated.View
-                    style={[styles.secondaryAction, buyButtonStyle]}
+              <GestureDetector gesture={ctaNativeGesture}>
+                <View style={styles.actions} collapsable={false}>
+                  <PressableScale
+                    onPress={handleVirtualTryOn}
+                    style={styles.primaryAction}
+                    accessibilityRole="button"
+                    accessibilityLabel="Dene"
+                  >
+                    <Sparkles color={colors.inverseText} size={ACTION_ICON_SIZE} />
+                    <Text style={styles.primaryActionText}>Dene</Text>
+                  </PressableScale>
+                  <PressableScale
+                    onPress={handleStorePress}
+                    style={styles.secondaryAction}
                     accessibilityRole="button"
                     accessibilityLabel="Mağazaya git"
                   >
                     <ShoppingBag color={colors.text} size={ACTION_ICON_SIZE} />
                     <Text style={styles.secondaryActionText}>Mağazaya Git</Text>
-                  </Animated.View>
-                </GestureDetector>
-              </View>
+                  </PressableScale>
+                </View>
+              </GestureDetector>
             ) : null}
           </View>
         </View>
@@ -486,7 +553,12 @@ export default function SwipeCard({
 
 /** Ekran kökünün 16px yatay padding’iyle aynı grid; ekstra inset yok. */
 const CARD_WIDTH = SCREEN_WIDTH - spacing.lg * 2;
-const CARD_HEIGHT = SCREEN_HEIGHT * CARD_HEIGHT_RATIO;
+const CARD_HEIGHT = estimateDiscoverCardHeight(SCREEN_HEIGHT);
+/**
+ * Çıkış hedefi = undo park Y. Clip dışında bitsin diye kart + 24px + gölge.
+ * Aynı uzunluk hem yukarı çıkış hem park dönüşü için geçerlidir.
+ */
+const DECK_CLEAR_TRAVEL_PX = deckClearTravelPx(CARD_HEIGHT);
 
 export const SWIPE_CARD_WIDTH = CARD_WIDTH;
 export const SWIPE_CARD_HEIGHT = CARD_HEIGHT;
@@ -494,10 +566,16 @@ export const SWIPE_CARD_HEIGHT = CARD_HEIGHT;
 const styles = StyleSheet.create({
   shadowWrap: {
     width: '100%',
-    height: CARD_HEIGHT,
+    height: '100%',
     borderRadius: radius.card,
     backgroundColor: colors.surface,
-    ...shadows.card,
+    ...shadows.stackSoft,
+  },
+  shadowWrapParked: {
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   card: {
     flex: 1,
@@ -530,9 +608,6 @@ const styles = StyleSheet.create({
   wash: {
     ...StyleSheet.absoluteFillObject,
   },
-  likeWash: {
-    backgroundColor: colors.likeWash,
-  },
   passWash: {
     backgroundColor: colors.passWash,
   },
@@ -548,28 +623,11 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     backgroundColor: colors.glass,
   },
-  likeStamp: {
-    left: spacing.xl,
-    borderColor: colors.stampAdd,
-    transform: [{ rotate: '-12deg' }],
-  },
   passStamp: {
+    left: spacing.xl,
     right: spacing.xl,
-    borderColor: colors.stampPass,
-    transform: [{ rotate: '12deg' }],
-  },
-  buyStamp: {
-    top: 88,
-    left: 72,
-    right: 72,
     justifyContent: 'center',
-    borderColor: colors.accent,
-  },
-  likeStampText: {
-    color: colors.stampAdd,
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: 1.2,
+    borderColor: colors.stampPass,
   },
   passStampText: {
     color: colors.stampPass,
@@ -577,11 +635,31 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.2,
   },
-  buyStampText: {
-    color: colors.accent,
-    fontSize: 18,
-    fontWeight: '800',
-    letterSpacing: 1.2,
+  heartBurst: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reasonChip: {
+    position: 'absolute',
+    left: spacing.md,
+    bottom: spacing.md,
+    maxWidth: '82%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.glass,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.chip,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  reasonChipText: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: '700',
+    flexShrink: 1,
   },
   authButton: {
     position: 'absolute',
@@ -605,12 +683,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   info: {
+    flexShrink: 0,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.hairline,
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
   },
   categoryBadge: {
     alignSelf: 'flex-start',
@@ -693,7 +772,7 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     gap: spacing.sm,
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
   },
   primaryAction: {
     flex: 1,
@@ -703,7 +782,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     backgroundColor: colors.accent,
     borderRadius: radius.button,
-    paddingVertical: spacing.md,
+    paddingVertical: layout.ctaPaddingVertical,
   },
   primaryActionText: {
     color: colors.inverseText,
@@ -720,7 +799,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.button,
-    paddingVertical: spacing.md,
+    paddingVertical: layout.ctaPaddingVertical,
   },
   secondaryActionText: {
     color: colors.text,

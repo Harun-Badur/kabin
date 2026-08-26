@@ -3,6 +3,7 @@
 declare namespace NodeJS {
   interface ProcessEnv {
     EXPO_PUBLIC_VTON_PROXY_URL?: string;
+    EXPO_PUBLIC_RECS_FEED_URL?: string;
     EXPO_PUBLIC_SUPABASE_URL?: string;
     EXPO_PUBLIC_SUPABASE_ANON_KEY?: string;
     EXPO_PUBLIC_SENTRY_DSN?: string;

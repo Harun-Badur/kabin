@@ -63,6 +63,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "import:feed": "tsx scripts/importFeed.ts",
+    "seed:attributes": "tsx scripts/seed-attributes.ts",
     "simulate:price-drop": "tsx scripts/simulate-price-drop.ts",
     "lint": "eslint .",
     "test": "jest"

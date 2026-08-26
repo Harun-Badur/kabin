@@ -1,4 +1,7 @@
+import { clearAnalyticsQueue } from '../lib/analytics';
 import { logger } from '../lib/logger';
+import { clearRecsCaches } from '../lib/recsConfig';
+import { resetSessionIntent } from '../lib/sessionIntent';
 import { getRequiredSupabaseClient } from '../lib/supabase';
 
 interface DeleteAccountResponse {
@@ -69,4 +72,8 @@ export const deleteAccount = async (): Promise<void> => {
     logger.error('Hesap silinemedi', { status: response.status, detail });
     throw new Error(detail ?? 'Hesap silinemedi. Lütfen tekrar dene.');
   }
+
+  await clearAnalyticsQueue();
+  resetSessionIntent();
+  await clearRecsCaches();
 };

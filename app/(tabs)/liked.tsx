@@ -27,6 +27,7 @@ import RefreshSpinner from '../../components/RefreshSpinner';
 import SkeletonShimmer from '../../components/SkeletonShimmer';
 import VirtualTryOnModal from '../../components/VirtualTryOnModal';
 import { logger } from '../../lib/logger';
+import { track } from '../../lib/analytics';
 import { colors, radius, shadows, spacing } from '../../lib/theme';
 import { openProductPage } from '../../services/deeplinkService';
 import { useAppStore } from '../../store/useAppStore';
@@ -250,6 +251,7 @@ export default function LikedScreen() {
       clearUndoTimer();
       void unlikeProduct(product.id)
         .then(() => {
+          track('dolap_remove', product.id, { source: 'wardrobe' });
           setUndoProduct(product);
           undoTimerRef.current = setTimeout(() => {
             setUndoProduct(null);

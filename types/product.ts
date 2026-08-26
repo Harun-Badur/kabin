@@ -2,6 +2,8 @@ import type { GarmentCategory } from './vton';
 
 export type FeedProvider = 'amazon' | 'trendyol' | 'hepsiburada' | 'mock';
 
+export type ProductGender = 'women' | 'men' | 'unisex';
+
 export interface ProductColor {
   name: string;
   hex: string;
@@ -15,6 +17,7 @@ export interface Product {
   currentPrice?: number;
   previousPrice?: number;
   lastPriceCheckedAt?: string;
+  createdAt?: string;
   brand: string;
   category: GarmentCategory;
   garmentDescription: string;
@@ -24,6 +27,16 @@ export interface Product {
   externalId?: string;
   colors?: ProductColor[];
   sizes?: string[];
+  /** Kanonik skorlama alanları; yoksa başlıktan türetilir. */
+  gender?: ProductGender;
+  colorSlugs?: string[];
+  fit?: string;
+  subcategory?: string;
+  brandSlug?: string;
+  priceBand?: string;
+  impressionCount?: number;
+  /** recs-feed reasons[0]; yoksa chip gösterilmez. UI üretmez. */
+  reason?: string;
 }
 
 export interface LikedProduct {
@@ -47,7 +60,7 @@ export interface FeedProductRow {
   product_url: string;
   category: string;
   affiliate_url: string | null;
-  garment_description?: string | null;
+  created_at?: string | null;
 }
 
 export const GARMENT_CATEGORY_LABEL: Record<GarmentCategory, string> = {

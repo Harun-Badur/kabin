@@ -253,6 +253,22 @@ export const insertPassedProduct = async (
   }
 };
 
+export const deletePassedProduct = async (
+  userId: string,
+  productId: string,
+): Promise<void> => {
+  const client = getRequiredSupabaseClient();
+  const { error } = await client
+    .from('passed_products')
+    .delete()
+    .eq('user_id', userId)
+    .eq('product_id', productId);
+
+  if (error) {
+    throw new Error(`Geçme geri alınamadı: ${error.message}`);
+  }
+};
+
 export const deleteLikedProduct = async (
   userId: string,
   productId: string,

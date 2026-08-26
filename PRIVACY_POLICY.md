@@ -1,12 +1,14 @@
 # Kabin — Gizlilik Politikası
 
-**Son güncelleme:** 21 Ağustos 2026
-**Uygulama:** Kabin (Android)
+**Son güncelleme:** 25 Ağustos 2026
+**Uygulama:** Kabin / VITRIVIA (Android)
 **İletişim:** destek@kabin.app
 
 Kabin; moda ürünlerini keşfetmenizi, yapay zekâ ile sanal olarak denemenizi ve
 beğendiklerinizi takip etmenizi sağlar. Bu politika hangi verileri topladığımızı,
 neden topladığımızı ve nasıl silebileceğinizi açıklar.
+
+VITRIVIA, uygulama içindeki etkileşimleri kişiselleştirilmiş öneriler sunmak amacıyla saklar.
 
 ---
 
@@ -16,6 +18,8 @@ neden topladığımızı ve nasıl silebileceğinizi açıklar.
 |------|-------|-----------------|----------------|
 | E-posta adresi | Hesap oluşturma ve giriş | Supabase (AB/ABD bölgesi) | Hesap silinene kadar |
 | Beğenilen / geçilen ürünler | Dolabınızı oluşturmak, aynı ürünü tekrar göstermemek | Supabase | Hesap silinene kadar |
+| Uygulama içi etkileşimler (beğeni, geçme, görüntüleme, arama, filtre, sanal deneme, mağaza tıklaması) | Kişiselleştirilmiş öneriler sunmak | Supabase | Hesap silinene kadar |
+| Stil stüdyosu tercihleri (beden, stil etiketleri) | Önerileri ve sanal denemeyi kişiselleştirmek | Supabase | Hesap silinene kadar |
 | Fiyat alarmı tercihleri | Fiyat düşünce bildirim göndermek | Supabase | Hesap silinene kadar |
 | Bildirim (push) tokenı | Fiyat düşüşü bildirimi göndermek | Supabase | Hesap silinene kadar |
 | Sanal deneme fotoğrafı | Yalnızca giydirme işlemini yapmak | **Saklanmaz** — bkz. bölüm 2 | 0 (işlem sonunda yok edilir) |
@@ -76,8 +80,9 @@ Hesabınızı ve tüm verilerinizi iki yolla silebilirsiniz.
 4. Onay penceresinde **Kalıcı olarak sil** seçeneğini onaylayın.
 
 Hesabınız, beğenileriniz, geçtiğiniz ürünler, fiyat alarmları, bildirim
-tokenları ve kota sayaçlarınız anında ve kalıcı olarak silinir. Bu işlem geri
-alınamaz.
+tokenları, kota sayaçlarınız, uygulama içi etkileşim kayıtlarınız, stil
+profiliniz ve kayıtlı model fotoğrafınız anında ve kalıcı olarak silinir. Bu
+işlem geri alınamaz.
 
 ### Web üzerinden / e-posta ile
 
@@ -124,11 +129,13 @@ değişiklikleri uygulama içinde duyururuz.
 
 # Kabin — Privacy Policy (English summary)
 
-**Last updated:** 21 August 2026 · **Contact:** destek@kabin.app
+**Last updated:** 25 August 2026 · **Contact:** destek@kabin.app
 
 **What we collect.** Your email address (for the account), the products you
-like or skip, your price-alert preferences, and your push notification token.
-All of this is stored in Supabase and kept until you delete your account. We do
+like or skip, your price-alert preferences, your push notification token, and
+in-app interactions used to personalize recommendations. VITRIVIA stores
+in-app interactions in order to provide personalized recommendations. All of
+this is stored in Supabase and kept until you delete your account. We do
 not collect advertising identifiers, location, or contacts, and we use no
 third-party analytics or ad SDKs.
 
@@ -146,10 +153,11 @@ the app keeps working.
 delivery). We do not sell your data.
 
 **Deleting your account.** In the app: open **Profile → Delete My Account** and
-confirm. Your account and all associated data are deleted permanently and
-immediately. If you no longer have the app installed, email
-**destek@kabin.app** from your account address with the subject "Account
-deletion request"; we process such requests within **30 days**.
+confirm. Your account, interactions, style profile, saved model photo, and all
+associated data are deleted permanently and immediately. If you no longer have
+the app installed, email **destek@kabin.app** from your account address with
+the subject "Account deletion request"; we process such requests within **30
+days**.
 
 **Your rights.** Under GDPR and Turkish KVKK you may access, correct, delete,
 restrict, or export your data. Contact **destek@kabin.app**.

@@ -41,6 +41,14 @@ export const colors = {
   likeWash: 'rgba(34, 197, 94, 0.18)',
   passWash: 'rgba(239, 68, 68, 0.18)',
   shadow: '#1E140A',
+  /** Discover segment: track arka planı, kutu/border yok. */
+  segmentTrackBg: 'transparent',
+  /** Aktif pill zemini. */
+  segmentActiveBg: '#FFFFFF',
+  /** Aktif segment metni (mercan değil). */
+  segmentActiveText: '#111827',
+  /** Pasif segment metni. */
+  segmentPassiveText: '#6B7280',
 } as const;
 
 export const radius = {
@@ -58,12 +66,54 @@ export const spacing = {
   xxl: 32,
 } as const;
 
-/** Header arama satırı ölçüleri. */
+/**
+ * Discover chrome ölçüleri. Kart yüksekliği ekranın kör bir yüzdesi değil;
+ * bu token’lardan kalan dikey alana oturur.
+ */
 export const layout = {
   headerControl: 48,
   headerGap: 10,
   filterDot: 8,
+  /** Status bar yoksa (bazı Android) üst boşluk. */
+  statusBarFallback: 28,
+  /** Safe area altındaki nefes payı. */
+  headerPaddingTop: spacing.sm,
+  /** Search → segment: 8–10 ritmi. */
+  searchToSegment: spacing.sm,
+  /** Segment → deck: 10–12 ritmi. */
+  headerToDeck: spacing.md,
+  headerToDeckMin: spacing.md,
+  headerToDeckTallScreen: 720,
+  segmentHeight: 36,
+  segmentInset: spacing.xs,
+  segmentOptionPaddingX: spacing.lg,
+  deckPadding: spacing.md,
+  tabBarContentHeight: 60,
+  tabBarFallbackPadding: spacing.md,
+  ctaPaddingVertical: 10,
 } as const;
+
+/**
+ * Segment → kart: 12px (spacing.md). Search→segment 8px (spacing.sm).
+ */
+export const headerToDeckForHeight = (_screenHeight: number): number =>
+  layout.headerToDeck;
+
+/** Discover iskeleti: gerçek inset bilinmezken kart yüksekliği tahmini. */
+export const estimateDiscoverCardHeight = (screenHeight: number): number => {
+  const topChrome =
+    layout.statusBarFallback +
+    layout.headerPaddingTop +
+    layout.headerControl +
+    layout.searchToSegment +
+    layout.segmentHeight +
+    headerToDeckForHeight(screenHeight);
+  const bottomChrome =
+    layout.tabBarContentHeight +
+    layout.tabBarFallbackPadding +
+    layout.deckPadding;
+  return Math.max(0, screenHeight - topChrome - bottomChrome);
+};
 
 /** Açık zeminde iskelet parıltısı beyaz bir ışık bandıdır. */
 export const gradients = {
@@ -90,6 +140,21 @@ export const shadows = {
     shadowRadius: 8,
     elevation: 2,
   },
+  segment: {
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  /** Discover deste: sakin, düşük elevation. */
+  stackSoft: {
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 1,
+  },
   input: {
     shadowColor: colors.inputShadow,
     shadowOffset: { width: 0, height: 2 },
@@ -98,3 +163,7 @@ export const shadows = {
     elevation: 2,
   },
 } as const;
+
+/** Discover park/clip: deste gölgesinin yayılımı. */
+export const CARD_SHADOW_SPREAD_PX =
+  shadows.stackSoft.shadowOffset.height + shadows.stackSoft.shadowRadius;

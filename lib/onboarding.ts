@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { logger } from './logger';
 
-const SWIPE_HINT_KEY = 'kabin.onboarding.swipeHint.v1';
+const SWIPE_HINT_KEY = 'kabin.onboarding.swipeHint.v4';
 const ONBOARDING_KEY = 'kabin.onboarding.v1';
 const SEEN_VALUE = 'seen';
 

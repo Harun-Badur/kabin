@@ -67,6 +67,33 @@ Deno.serve(async (request: Request): Promise<Response> => {
     );
   }
 
+  const { error: eventsError } = await admin
+    .from('user_events')
+    .delete()
+    .eq('user_id', user.id);
+  if (eventsError) {
+    console.error('user_events silinemedi', { message: eventsError.message });
+  }
+
+  const { error: profileError } = await admin
+    .from('user_style_profiles')
+    .delete()
+    .eq('user_id', user.id);
+  if (profileError) {
+    console.error('user_style_profiles silinemedi', {
+      message: profileError.message,
+    });
+  }
+
+  const { error: storageError } = await admin.storage
+    .from('model-photos')
+    .remove([`${user.id}/model.jpg`]);
+  if (storageError) {
+    console.error('model fotoğrafı silinemedi', {
+      message: storageError.message,
+    });
+  }
+
   const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
   if (deleteError) {
     console.error('Hesap silinemedi', { message: deleteError.message });

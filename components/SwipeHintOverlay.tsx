@@ -1,6 +1,5 @@
 import { useCallback, useEffect } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -22,8 +21,6 @@ import { colors, radius, shadows, spacing } from '../lib/theme';
 interface SwipeHintOverlayProps {
   onDismiss: () => void;
 }
-
-const HINT_ICON_SIZE = 16;
 
 export default function SwipeHintOverlay({
   onDismiss,
@@ -93,21 +90,12 @@ export default function SwipeHintOverlay({
         accessibilityRole="button"
         accessibilityLabel="Kaydırma ipucunu kapat"
       >
-        <Animated.View style={[styles.row, bobStyle]}>
-          <View style={styles.hint}>
-            <ArrowRight color={colors.accent} size={HINT_ICON_SIZE} />
-            <Text style={styles.hintText}>ekle</Text>
-          </View>
-          <View style={styles.hint}>
-            <ArrowLeft color={colors.accent} size={HINT_ICON_SIZE} />
-            <Text style={styles.hintText}>geç</Text>
-          </View>
-          <View style={styles.hint}>
-            <ArrowUp color={colors.accent} size={HINT_ICON_SIZE} />
-            <Text style={styles.hintText}>mağazaya</Text>
-          </View>
+        <Animated.View style={bobStyle}>
+          <Text style={styles.caption}>
+            Yukarı: Geç · Aşağı: Geri Al · Çift dokun: Dolaba ekle
+          </Text>
         </Animated.View>
-        <Text style={styles.caption}>Kapatmak için dokun</Text>
+        <Text style={styles.dismiss}>Kapatmak için dokun</Text>
       </Pressable>
     </Animated.View>
   );
@@ -131,25 +119,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     ...shadows.card,
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.lg,
-    flexWrap: 'wrap',
-  },
-  hint: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  hintText: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
   caption: {
-    marginTop: spacing.md,
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  dismiss: {
+    marginTop: spacing.sm,
     color: colors.textSecondary,
     fontSize: 12,
     fontWeight: '600',

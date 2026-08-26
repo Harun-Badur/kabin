@@ -1,29 +1,11 @@
 import { logger } from '../lib/logger';
 import { parseNumeric } from '../lib/price';
 import { getRequiredSupabaseClient } from '../lib/supabase';
-import type { Product } from '../types/product';
-import { getDisplayPrice } from '../types/product';
 import type {
   PriceRange,
-  ScoredProduct,
   UserPreferences,
 } from '../types/recommendation';
 import type { GarmentCategory } from '../types/vton';
-
-/**
- * Skorlama ağırlıkları. Kategori ve marka bonusları, kullanıcının EN ÇOK
- * beğendiği kategoriye/markaya göre oranlanır: baskın olan tam puanı alır,
- * yarısı kadar beğenilen yarı puan alır. Sabit bonus verilseydi üç kategoriyi
- * de beğenen kullanıcıda tüm ürünler eşitlenir ve sıralama gürültüye kalırdı.
- */
-export const CATEGORY_MATCH_WEIGHT = 10;
-export const BRAND_MATCH_WEIGHT = 5;
-export const PRICE_RANGE_WEIGHT = 3;
-export const PASSED_PENALTY = 20;
-export const NOISE_AMPLITUDE = 2;
-
-/** Fiyat bonusu aralık kenarlarında bu orana kadar iner. */
-const PRICE_EDGE_FALLOFF = 0.5;
 
 interface PreferenceSignal {
   category: GarmentCategory;
@@ -127,12 +109,7 @@ const readLikeSignals = async (
 };
 
 /**
- * Kullanıcının beğeni/geçme geçmişinden tercih profilini üretir. Store'daki
- * hidrasyon feed yüklemesinden sonra bitebildiği için veriler doğrudan
- * Supabase'den okunur; böylece sıralama oturum yarışına bağlı kalmaz.
- *
- * Kişiselleştirme zorunlu bir özellik değil: sorgu düşerse boş profille
- * dönülür ve feed rastgele sıralamaya geri düşer.
+ * Beğeni histogramı (eski fallback). Skorlama lib/scoring.ts + user_style_profiles.
  */
 export const getUserPreferences = async (
   userId: string,
@@ -159,69 +136,3 @@ export const getUserPreferences = async (
 
   return preferences;
 };
-
-const scoreCategory = (
-  category: GarmentCategory,
-  preferences: UserPreferences,
-): number => {
-  const counts = Object.values(preferences.categoryCounts);
-  const topCount = Math.max(...counts);
-  if (topCount === 0) {
-    return 0;
-  }
-  return CATEGORY_MATCH_WEIGHT * (preferences.categoryCounts[category] / topCount);
-};
-
-const scoreBrand = (brand: string, preferences: UserPreferences): number => {
-  const counts = Object.values(preferences.brandCounts);
-  if (counts.length === 0) {
-    return 0;
-  }
-  const topCount = Math.max(...counts);
-  const brandCount = preferences.brandCounts[normalizeBrand(brand)] ?? 0;
-  if (topCount === 0 || brandCount === 0) {
-    return 0;
-  }
-  return BRAND_MATCH_WEIGHT * (brandCount / topCount);
-};
-
-const scorePrice = (price: number, range: PriceRange | null): number => {
-  if (!range || price < range.min || price > range.max) {
-    return 0;
-  }
-
-  const span = Math.max(range.max - range.min, 1);
-  const distanceFromAverage = Math.abs(price - range.average) / span;
-  return (
-    PRICE_RANGE_WEIGHT *
-    (1 - Math.min(distanceFromAverage, PRICE_EDGE_FALLOFF))
-  );
-};
-
-const randomNoise = (): number =>
-  (Math.random() * 2 - 1) * NOISE_AMPLITUDE;
-
-export const scoreProduct = (
-  product: Product,
-  preferences: UserPreferences,
-): number => {
-  const passedPenalty = preferences.passedProductIds.has(product.id)
-    ? -PASSED_PENALTY
-    : 0;
-
-  return (
-    scoreCategory(product.category, preferences) +
-    scoreBrand(product.brand, preferences) +
-    scorePrice(getDisplayPrice(product), preferences.priceRange) +
-    passedPenalty +
-    randomNoise()
-  );
-};
-
-export const rankProducts = (
-  products: Product[],
-  preferences: UserPreferences,
-): ScoredProduct[] =>
-  products
-    .map((product) => ({ product, score: scoreProduct(product, preferences) }))
-    .sort((left, right) => right.score - left.score);

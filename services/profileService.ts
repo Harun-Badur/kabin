@@ -198,7 +198,27 @@ export const upsertStudioProfile = async (
     throw new Error('Değişiklik kaydedilemedi. Lütfen tekrar dene.');
   }
 
+  if (patch.styleTags !== undefined) {
+    void syncDeclaredStyleTags(patch.styleTags);
+  }
+
   return mapRow(data);
+};
+
+export const syncDeclaredStyleTags = async (
+  tags: string[],
+): Promise<void> => {
+  try {
+    const client = getRequiredSupabaseClient();
+    const { error } = await client.rpc('sync_declared_style_tags', {
+      p_tags: tags,
+    });
+    if (error) {
+      logger.debug('Declared style sync başarısız', { detail: error.message });
+    }
+  } catch (error) {
+    logger.debug('Declared style sync başarısız', { error });
+  }
 };
 
 export const uploadModelPhoto = async (

@@ -1,6 +1,10 @@
 import { Alert, Linking } from 'react-native';
+import { track } from '../lib/analytics';
+import { LEGACY_RECOMMENDATION_ID } from '../types/analytics';
 import { buildAffiliateUrl } from '../lib/deeplink';
 import { logger } from '../lib/logger';
+import { getLastRecommendationId } from '../lib/recsFeedState';
+import { recordSessionProductAction } from '../lib/sessionIntent';
 import type { FeedProvider, Product } from '../types/product';
 
 // Trendyol ürün sayfası: /p/{contentId} kısa form.
@@ -110,9 +114,12 @@ export const openProductPage = async (product: Product): Promise<void> => {
       return;
     }
 
-    const targetUrl = product.affiliateUrl?.trim()
+    const hasStoredAffiliate = Boolean(product.affiliateUrl?.trim());
+    const targetUrl = hasStoredAffiliate
       ? resolvedUrl
       : applyAffiliateTag(product, resolvedUrl);
+    const affiliateUsed =
+      hasStoredAffiliate || targetUrl !== resolvedUrl;
 
     const canOpen = await Linking.canOpenURL(targetUrl);
     if (!canOpen) {
@@ -124,6 +131,14 @@ export const openProductPage = async (product: Product): Promise<void> => {
     }
 
     await Linking.openURL(targetUrl);
+    recordSessionProductAction('store_click', product);
+    track('store_click', product.id, {
+      provider: product.provider ?? 'mock',
+      external_id: product.externalId ?? null,
+      affiliate_used: affiliateUsed,
+      recommendation_id:
+        getLastRecommendationId() ?? LEGACY_RECOMMENDATION_ID,
+    });
   } catch (error) {
     logger.error('Pazaryeri sayfası açılamadı', {
       error,

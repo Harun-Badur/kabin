@@ -2,21 +2,19 @@ import { useEffect } from 'react';
 import { BackHandler, StyleSheet } from 'react-native';
 import { Tabs, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Compass, Shirt, User } from 'lucide-react-native';
+import { Compass, Shirt, Sparkles, User } from 'lucide-react-native';
 import { TAB_TRANSITION_MS } from '../../lib/motion';
-import { colors, spacing } from '../../lib/theme';
+import { colors, layout, spacing } from '../../lib/theme';
 
 const ACTIVE_COLOR = colors.accent;
 const INACTIVE_COLOR = colors.tabInactive;
 const ICON_SIZE = 22;
-const TAB_BAR_CONTENT_HEIGHT = 60;
-const TAB_BAR_FALLBACK_PADDING = 12;
 
 export default function TabsLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const bottomInset =
-    insets.bottom > 0 ? insets.bottom : TAB_BAR_FALLBACK_PADDING;
+    insets.bottom > 0 ? insets.bottom : layout.tabBarFallbackPadding;
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener(
@@ -44,7 +42,7 @@ export default function TabsLayout() {
         tabBarStyle: [
           styles.bar,
           {
-            height: TAB_BAR_CONTENT_HEIGHT + bottomInset,
+            height: layout.tabBarContentHeight + bottomInset,
             paddingBottom: bottomInset,
           },
         ],
@@ -63,6 +61,15 @@ export default function TabsLayout() {
         options={{
           title: 'Keşfet',
           tabBarIcon: ({ color }) => <Compass color={color} size={ICON_SIZE} />,
+        }}
+      />
+      <Tabs.Screen
+        name="style"
+        options={{
+          title: 'Stil',
+          tabBarIcon: ({ color }) => (
+            <Sparkles color={color} size={ICON_SIZE} />
+          ),
         }}
       />
       <Tabs.Screen

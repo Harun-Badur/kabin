@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import Constants from 'expo-constants';
-import { Stack } from 'expo-router';
+import { Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AppErrorBoundary from '../components/AppErrorBoundary';
 import OnboardingScreen from '../components/OnboardingScreen';
 import { AuthProvider, useAuthContext } from '../hooks/useAuthContext';
+import { initAnalytics, track } from '../lib/analytics';
 import { logger } from '../lib/logger';
 import { STACK_TRANSITION_MS } from '../lib/motion';
 import {
@@ -103,11 +104,31 @@ function RootNavigator() {
   );
 }
 
+function AnalyticsRuntime() {
+  const pathname = usePathname();
+  const previousPathRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    initAnalytics();
+  }, []);
+
+  useEffect(() => {
+    const from = previousPathRef.current;
+    if (from !== null && from !== pathname) {
+      track('back', null, { from, to: pathname });
+    }
+    previousPathRef.current = pathname;
+  }, [pathname]);
+
+  return null;
+}
+
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <AppErrorBoundary>
         <AuthProvider>
+          <AnalyticsRuntime />
           <RootNavigator />
         </AuthProvider>
         <StatusBar style="dark" />
