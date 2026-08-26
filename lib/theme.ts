@@ -78,11 +78,11 @@ export const layout = {
   statusBarFallback: 28,
   /** Safe area altındaki nefes payı. */
   headerPaddingTop: spacing.sm,
-  /** Search → segment: 8–10 ritmi. */
-  searchToSegment: spacing.sm,
-  /** Segment → deck: 10–12 ritmi. */
-  headerToDeck: spacing.md,
-  headerToDeckMin: spacing.md,
+  /** Search → segment: eski 8px’in ~%25 sıkısı. */
+  searchToSegment: 6,
+  /** Segment → deck: eski 12px; kart 8–12px yukarı kayar. */
+  headerToDeck: 6,
+  headerToDeckMin: 4,
   headerToDeckTallScreen: 720,
   segmentHeight: 36,
   segmentInset: spacing.xs,
@@ -93,11 +93,26 @@ export const layout = {
   ctaPaddingVertical: 10,
 } as const;
 
+const DISCOVER_SEARCH_TO_SEGMENT_WAS = spacing.sm;
+const DISCOVER_HEADER_TO_DECK_WAS = spacing.md;
+
 /**
- * Segment → kart: 12px (spacing.md). Search→segment 8px (spacing.sm).
+ * Segment → kart: kısa ekranda 4px, uzun ekranda 6px.
+ * Search→segment 6px.
  */
-export const headerToDeckForHeight = (_screenHeight: number): number =>
-  layout.headerToDeck;
+export const headerToDeckForHeight = (screenHeight: number): number =>
+  screenHeight >= layout.headerToDeckTallScreen
+    ? layout.headerToDeck
+    : layout.headerToDeckMin;
+
+/**
+ * Header sıkışınca kart boyutu değişmesin: aynı pay tab bar üstünde kalır.
+ */
+export const discoverCardLiftForHeight = (screenHeight: number): number =>
+  DISCOVER_SEARCH_TO_SEGMENT_WAS -
+  layout.searchToSegment +
+  DISCOVER_HEADER_TO_DECK_WAS -
+  headerToDeckForHeight(screenHeight);
 
 /** Discover iskeleti: gerçek inset bilinmezken kart yüksekliği tahmini. */
 export const estimateDiscoverCardHeight = (screenHeight: number): number => {
@@ -111,7 +126,8 @@ export const estimateDiscoverCardHeight = (screenHeight: number): number => {
   const bottomChrome =
     layout.tabBarContentHeight +
     layout.tabBarFallbackPadding +
-    layout.deckPadding;
+    layout.deckPadding +
+    discoverCardLiftForHeight(screenHeight);
   return Math.max(0, screenHeight - topChrome - bottomChrome);
 };
 

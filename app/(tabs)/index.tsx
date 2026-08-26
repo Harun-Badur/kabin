@@ -36,7 +36,15 @@ import {
   undoReturnProgress,
 } from '../../lib/motion';
 import { hasSeenSwipeHint, markSwipeHintSeen } from '../../lib/onboarding';
-import { colors, headerToDeckForHeight, layout, radius, shadows, spacing } from '../../lib/theme';
+import {
+  colors,
+  discoverCardLiftForHeight,
+  headerToDeckForHeight,
+  layout,
+  radius,
+  shadows,
+  spacing,
+} from '../../lib/theme';
 import {
   getRedirectLabel,
   openProductPage,
@@ -285,6 +293,52 @@ function StackSlot({
     };
   });
 
+  /**
+   * Park kartı idle’da aktif kartın üstünden taşmasın: görünür pencere
+   * yalnız aşağı çekiş kadar açılır (undo 1:1). Transform clip kaçışına
+   * karşı layout `top` + overflow hidden.
+   */
+  const peekRevealStyle = useAnimatedStyle(() => ({
+    height: Math.max(deckPullY.value, 0),
+  }));
+  const peekInnerStyle = useAnimatedStyle(() => ({
+    top: undoParkY + Math.max(deckPullY.value, 0),
+  }));
+
+  const card = (
+    <SwipeCard
+      product={product}
+      isInteractive={isTop}
+      isExiting={isExiting}
+      canLike={canLike}
+      canUndo={canUndo}
+      castShadow={isTop}
+      deckPullY={isTop ? deckPullY : undefined}
+      onAddToCloset={onAddToCloset}
+      onPass={onPass}
+      onPassExitSettled={onPassExitSettled}
+      onVirtualTryOn={onVirtualTryOn}
+      onBuy={onBuy}
+      onUndoPass={onUndoPass}
+      onRequireAuth={onRequireAuth}
+      onImpression={isTop ? onImpression : undefined}
+    />
+  );
+
+  if (isPeek) {
+    return (
+      <Animated.View
+        pointerEvents="none"
+        collapsable={false}
+        style={[styles.peekReveal, peekRevealStyle]}
+      >
+        <Animated.View style={[styles.peekRevealInner, peekInnerStyle]}>
+          {card}
+        </Animated.View>
+      </Animated.View>
+    );
+  }
+
   return (
     <View
       pointerEvents={isTop ? 'auto' : 'none'}
@@ -293,30 +347,12 @@ function StackSlot({
         {
           zIndex: isExiting
             ? DECK_VISIBLE_COUNT + 2
-            : isPeek
-              ? DECK_VISIBLE_COUNT + 1
-              : DECK_VISIBLE_COUNT - depth,
+            : DECK_VISIBLE_COUNT - depth,
         },
       ]}
     >
       <Animated.View style={[styles.cardFill, stackOuterStyle]}>
-        <SwipeCard
-          product={product}
-          isInteractive={isTop}
-          isExiting={isExiting}
-          canLike={canLike}
-          canUndo={canUndo}
-          castShadow={!isPeek && !isExiting}
-          deckPullY={isTop ? deckPullY : undefined}
-          onAddToCloset={onAddToCloset}
-          onPass={onPass}
-          onPassExitSettled={onPassExitSettled}
-          onVirtualTryOn={onVirtualTryOn}
-          onBuy={onBuy}
-          onUndoPass={onUndoPass}
-          onRequireAuth={onRequireAuth}
-          onImpression={isTop ? onImpression : undefined}
-        />
+        {card}
       </Animated.View>
     </View>
   );
@@ -327,6 +363,7 @@ export default function FeedScreen() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const headerToDeckPx = headerToDeckForHeight(windowHeight);
+  const discoverCardLiftPx = discoverCardLiftForHeight(windowHeight);
   const { user } = useAuthContext();
   const currentProducts = useAppStore((state) => state.currentProducts);
   const feedStatus = useAppStore((state) => state.feedStatus);
@@ -651,7 +688,7 @@ export default function FeedScreen() {
       <View
         style={[
           styles.body,
-          { paddingBottom: layout.deckPadding },
+          { paddingBottom: layout.deckPadding + discoverCardLiftPx },
         ]}
       >
         {isSearching ? (
@@ -832,6 +869,24 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     bottom: 0,
+  },
+  /**
+   * Idle yükseklik 0: park kartı aktif kartın üst kenarına binemez.
+   * Aşağı çekişte pencere 1:1 açılır.
+   */
+  peekReveal: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    overflow: 'hidden',
+    zIndex: DECK_VISIBLE_COUNT + 1,
+  },
+  peekRevealInner: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: SWIPE_CARD_HEIGHT,
   },
   cardFill: {
     ...StyleSheet.absoluteFillObject,

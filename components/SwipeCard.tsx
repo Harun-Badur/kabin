@@ -400,13 +400,13 @@ export default function SwipeCard({
       <Animated.View
         style={[
           styles.shadowWrap,
-          !castShadow ? styles.shadowWrapParked : null,
+          castShadow ? styles.shadowWrapFront : styles.shadowWrapParked,
           animatedCardStyle,
         ]}
         accessibilityRole="image"
         accessibilityLabel={`${product.brand} ${product.title}, ${formatPrice(product)}`}
       >
-        <View style={styles.card}>
+        <View style={[styles.card, !isInteractive ? styles.cardBehind : null]}>
           <View style={styles.imageWrap}>
             {hasImageError ? (
               <View style={styles.imageFallback}>
@@ -569,6 +569,8 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: radius.card,
     backgroundColor: colors.surface,
+  },
+  shadowWrapFront: {
     ...shadows.stackSoft,
   },
   shadowWrapParked: {
@@ -584,6 +586,9 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     overflow: 'hidden',
     backgroundColor: colors.surface,
+  },
+  cardBehind: {
+    borderWidth: 0,
   },
   imageWrap: {
     flex: 1,

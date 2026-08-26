@@ -1,4 +1,5 @@
 import {
+  discoverCardLiftForHeight,
   estimateDiscoverCardHeight,
   headerToDeckForHeight,
   layout,
@@ -13,7 +14,8 @@ const chromeFor = (screenHeight: number): number =>
   headerToDeckForHeight(screenHeight) +
   layout.tabBarContentHeight +
   layout.tabBarFallbackPadding +
-  layout.deckPadding;
+  layout.deckPadding +
+  discoverCardLiftForHeight(screenHeight);
 
 describe('discover layout', () => {
   it.each([640, 691, 720, 800, 844, 915, 1536])(
@@ -27,16 +29,22 @@ describe('discover layout', () => {
     },
   );
 
-  it('segment → kart nefesi 10–12px token’dır', () => {
-    expect(headerToDeckForHeight(640)).toBe(layout.headerToDeck);
+  it('segment → kart nefesi kısa ekranda 4px, uzunda 6px’dir', () => {
+    expect(headerToDeckForHeight(640)).toBe(layout.headerToDeckMin);
     expect(headerToDeckForHeight(1536)).toBe(layout.headerToDeck);
-    expect(layout.headerToDeck).toBeGreaterThanOrEqual(10);
-    expect(layout.headerToDeck).toBeLessThanOrEqual(12);
+    expect(layout.headerToDeckMin).toBe(4);
+    expect(layout.headerToDeck).toBe(6);
   });
 
-  it('search → segment boşluğu 8–10px’dir', () => {
-    expect(layout.searchToSegment).toBeGreaterThanOrEqual(8);
-    expect(layout.searchToSegment).toBeLessThanOrEqual(10);
+  it('search → segment boşluğu ~%25 sıkıdır (6px)', () => {
+    expect(layout.searchToSegment).toBe(6);
+  });
+
+  it('kart kaldırması 8–12px’dir; kart yüksekliği korunur', () => {
+    expect(discoverCardLiftForHeight(640)).toBeGreaterThanOrEqual(8);
+    expect(discoverCardLiftForHeight(640)).toBeLessThanOrEqual(12);
+    expect(discoverCardLiftForHeight(1536)).toBeGreaterThanOrEqual(8);
+    expect(discoverCardLiftForHeight(1536)).toBeLessThanOrEqual(12);
   });
 
   it('segment yüksekliği 34–38 aralığındadır; CTA payı deckPadding’de kalır', () => {

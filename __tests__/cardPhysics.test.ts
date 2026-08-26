@@ -122,16 +122,18 @@ describe('stack geometry', () => {
     expect(pose.opacity).toBe(1);
   });
 
-  it('yalnız bir arka kart hafif peek gösterir; 2. arka kart gizli', () => {
+  it('yalnız bir arka kart örtülü durur; 2. arka kart gizli', () => {
     expect(bottomEdge(1)).toBeCloseTo(DECK_PEEK_STEP_PX, 5);
+    expect(bottomEdge(1)).toBe(0);
     expect(getStackPose(1, CARD_H).opacity).toBe(DECK_OPACITY_BY_DEPTH[1]);
-    expect(getStackPose(1, CARD_H).scale).toBe(0.98);
+    expect(getStackPose(1, CARD_H).scale).toBe(0.995);
     expect(getStackPose(2, CARD_H).opacity).toBe(0);
     expect(getStackPose(9, CARD_H).opacity).toBe(0);
   });
 
   it('kenar payı deck padding’ini aşmaz', () => {
     expect(bottomEdge(1)).toBeLessThanOrEqual(12);
+    expect(DECK_PEEK_STEP_PX).toBe(0);
   });
 
   it('taşan derinlik son basamağa sabitlenir', () => {
@@ -148,16 +150,15 @@ describe('stack geometry', () => {
 });
 
 describe('deck rest pose', () => {
-  it('öndeki iki katman: ana kart opak, peek sakin, rezerv gizli', () => {
+  it('öndeki kart opak; arka katmanların kenarı yok', () => {
     expect(DECK_OPACITY_BY_DEPTH[0]).toBe(1);
-    expect(DECK_OPACITY_BY_DEPTH[1]).toBeGreaterThanOrEqual(0.65);
-    expect(DECK_OPACITY_BY_DEPTH[1]).toBeLessThanOrEqual(0.75);
+    expect(DECK_OPACITY_BY_DEPTH[1]).toBe(0);
     expect(DECK_OPACITY_BY_DEPTH[2]).toBe(0);
   });
 
-  it('görünür arka kart 0.96–0.98 scale', () => {
-    expect(DECK_SCALE_BY_DEPTH[1]).toBeGreaterThanOrEqual(0.96);
-    expect(DECK_SCALE_BY_DEPTH[1]).toBeLessThanOrEqual(0.98);
+  it('görünür arka kart neredeyse tam örtülü (0.99–0.998)', () => {
+    expect(DECK_SCALE_BY_DEPTH[1]).toBeGreaterThanOrEqual(0.99);
+    expect(DECK_SCALE_BY_DEPTH[1]).toBeLessThanOrEqual(0.998);
   });
 
   it('scale basamakları teleport etmeyecek kadar dar', () => {

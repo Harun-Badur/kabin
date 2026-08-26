@@ -7,13 +7,13 @@ export const PRESS_DURATION_MS = 100;
 export const TAB_TRANSITION_MS = 200;
 export const STACK_TRANSITION_MS = 200;
 
-/** Deste hissi: önde 1 baskın kart + 1 hafif peek; 2. arka kart mount kalır, görünmez. */
+/** Deste hissi: önde 1 kart; arka katmanlar mount kalır, görünmez. */
 export const DECK_VISIBLE_COUNT = 3;
-export const DECK_SCALE_BY_DEPTH = [1, 0.98, 0.96];
-/** Tek görünür arka kartın alt kenar payı. */
-export const DECK_PEEK_STEP_PX = 4;
-/** Ana kart opak; peek sakin; rezerv gizli. */
-export const DECK_OPACITY_BY_DEPTH = [1, 0.7, 0];
+export const DECK_SCALE_BY_DEPTH = [1, 0.995, 0.99];
+/** Alt kenarda ayrı kart şeridi yok. */
+export const DECK_PEEK_STEP_PX = 0;
+/** Ana kart opak; arka kartların kenarı idle’da yok. */
+export const DECK_OPACITY_BY_DEPTH = [1, 0, 0];
 export const DECK_SPRING = { damping: 18, stiffness: 200, mass: 0.7 } as const;
 /** Promotion: kısa, overshoot yok — “yeni kart doğdu” hissi yok. */
 export const DECK_PROMOTE_SPRING = {
@@ -66,8 +66,8 @@ export interface StackPose {
  */
 export const getStackPose = (depth: number, cardHeightPx: number): StackPose => {
   const step = depth <= 0 ? 0 : depth >= 2 ? 2 : 1;
-  const scale = step === 0 ? 1 : step === 1 ? 0.98 : 0.96;
-  const opacity = step === 0 ? 1 : step === 1 ? 0.7 : 0;
+  const scale = step === 0 ? 1 : step === 1 ? 0.995 : 0.99;
+  const opacity = step === 0 ? 1 : 0;
   const shrinkCompensation = ((1 - scale) * cardHeightPx) / 2;
   const peek = step === 1 ? DECK_PEEK_STEP_PX : 0;
   return {
