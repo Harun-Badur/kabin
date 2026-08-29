@@ -13,7 +13,6 @@ module.exports = tseslint.config(
       'coverage/**',
       'supabase/functions/**',
       'scripts/**',
-      'modal/**',
       'babel.config.js',
       'jest.config.js',
       'eslint.config.js',

@@ -26,7 +26,7 @@ import type {
   SessionIntent,
 } from '../types/recommendation';
 import { DEFAULT_FEED_MODE } from '../types/recommendation';
-import type { GarmentCategory } from '../types/vton';
+import type { GarmentCategory } from '../types/product';
 
 export type { ProductGender } from '../types/product';
 

@@ -1,4 +1,4 @@
-import type { GarmentCategory } from './vton';
+export type GarmentCategory = 'upper_body' | 'lower_body' | 'dresses';
 
 export type FeedProvider = 'amazon' | 'trendyol' | 'hepsiburada' | 'mock';
 

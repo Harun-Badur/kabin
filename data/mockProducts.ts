@@ -1,4 +1,3 @@
-// VTON kalitesi için yalnızca flat-lay/ürün odaklı görsel kullanın.
 import type { Product } from '../types/product';
 
 export const MOCK_PRODUCTS: Product[] = [

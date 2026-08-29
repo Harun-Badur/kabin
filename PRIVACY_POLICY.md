@@ -34,15 +34,11 @@ toplamıyoruz. Üçüncü taraf analitik veya reklam SDK'sı kullanmıyoruz.
 
 Sanal deneme özelliğini kullandığınızda:
 
-1. Galerinizden seçtiğiniz fotoğraf cihazınızda küçültülür (en fazla 768 piksel
-   genişlik, JPEG).
-2. Fotoğraf, şifreli (HTTPS) bağlantı üzerinden giydirme işlemini yapan GPU
-   servisimize (**Modal.com**, ABD) gönderilir.
-3. Giydirme işlemi bittiğinde sonuç görseli cihazınıza döner. **Fotoğrafınız ve
-   sonuç görseli sunucuda kalıcı olarak saklanmaz** — kalıcı depolamaya
-   yazılmazlar.
-4. Fotoğrafınız model eğitimi, reklam veya profilleme için **kullanılmaz** ve
-   başka hiçbir üçüncü tarafla paylaşılmaz.
+1. Galerinizden seçtiğiniz fotoğraf cihazınızda tutulur.
+2. Bu sürümde fotoğraf bir giydirme sağlayıcısına gönderilmez.
+3. Sonuç görseli üretildiğinde yalnızca cihazınızda gösterilir; **kalıcı sunucu
+   deposuna yazılmaz**.
+4. Fotoğrafınız model eğitimi, reklam veya profilleme için **kullanılmaz**.
 
 Bu işlem için uygulama içinde ilk kullanımda **açık rızanız** alınır. Rıza
 vermezseniz sanal deneme özelliği çalışmaz; uygulamanın diğer bölümlerini
@@ -57,7 +53,6 @@ kullanmaya devam edebilirsiniz.
 | Alt işleyici | Amaç | Aktarılan veri |
 |--------------|------|----------------|
 | Supabase Inc. | Veritabanı, kimlik doğrulama | E-posta, beğeniler, bildirim tokenı |
-| Modal Labs Inc. | Sanal deneme (GPU çıkarım) | Deneme fotoğrafı (geçici) |
 | Expo (Push Notification Service) | Bildirim iletimi | Bildirim tokenı |
 
 Verilerinizi satmıyoruz ve reklam amaçlı paylaşmıyoruz.
@@ -139,18 +134,14 @@ this is stored in Supabase and kept until you delete your account. We do
 not collect advertising identifiers, location, or contacts, and we use no
 third-party analytics or ad SDKs.
 
-**Your try-on photo.** When you use the virtual try-on feature, the photo you
-pick is resized on your device and sent over HTTPS to our GPU inference
-provider (**Modal.com**, USA) solely to generate the try-on image. The photo is
-**not stored** — neither the input nor the result is written to persistent
-storage — and it is never used for model training, advertising, or profiling,
-nor shared with any other third party. We ask for your **explicit consent**
-before the first try-on; if you decline, the feature is disabled and the rest of
-the app keeps working.
+**Your try-on photo.** The virtual try-on screen is still in the app. In this
+version the photo is **not sent** to a GPU inference provider. When a result
+exists it is shown only on your device and is **not stored** on our servers. We
+still ask for your **explicit consent** before try-on; if you decline, the
+feature is disabled and the rest of the app keeps working.
 
-**Sub-processors.** Supabase (database and authentication), Modal Labs
-(transient try-on inference), Expo Push Notification Service (notification
-delivery). We do not sell your data.
+**Sub-processors.** Supabase (database and authentication), Expo Push
+Notification Service (notification delivery). We do not sell your data.
 
 **Deleting your account.** In the app: open **Profile → Delete My Account** and
 confirm. Your account, interactions, style profile, saved model photo, and all

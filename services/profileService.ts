@@ -1,9 +1,9 @@
-import * as ImageManipulator from 'expo-image-manipulator';
 import {
   cacheDirectory,
   downloadAsync,
 } from 'expo-file-system/legacy';
 import { logger } from '../lib/logger';
+import { preparePersonJpegUri } from '../lib/personPhotoPrepare';
 import {
   clampHeightCm,
   clampWeightKg,
@@ -18,7 +18,6 @@ import type {
 
 export const MODEL_PHOTOS_BUCKET = 'model-photos';
 const MODEL_PHOTO_FILENAME = 'model.jpg';
-const IMAGE_MAX_WIDTH = 768;
 const SIGNED_URL_TTL_SEC = 60 * 60;
 const UPLOAD_TIMEOUT_MS = 60_000;
 
@@ -236,17 +235,9 @@ export const uploadModelPhoto = async (
   }
 
   onProgress(0.08);
-  const prepared = await ImageManipulator.manipulateAsync(
-    localUri,
-    [{ resize: { width: IMAGE_MAX_WIDTH } }],
-    {
-      compress: 0.8,
-      format: ImageManipulator.SaveFormat.JPEG,
-    },
-  );
+  const jpegUri = await preparePersonJpegUri(localUri);
   onProgress(0.18);
-
-  const fileResponse = await fetch(prepared.uri);
+  const fileResponse = await fetch(jpegUri);
   const blob = await fileResponse.blob();
   const path = modelPhotoPathFor(userId);
   const token = await requireAccessToken();

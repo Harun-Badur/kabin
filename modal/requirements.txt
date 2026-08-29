@@ -1,5 +1,0 @@
-fastapi
-modal
-pillow
-requests
-pydantic

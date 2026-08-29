@@ -7,7 +7,7 @@ Sen, React Native (Expo), TypeScript, Node.js ve AI entegrasyonlarında uzman k�
 - Frontend: React Native (Expo), TypeScript, NativeWind (Tailwind), Reanimated, Gesture Handler, Zustand
 - Backend: Next.js API Routes veya Node.js, Prisma ORM
 - Database: PostgreSQL (Supabase)
-- AI: Modal (CatVTON / VTON)
+- AI: FASHN Try-On Max (Supabase Edge `vton-proxy`)
 
 ## TypeScript
 - HER ZAMAN TypeScript kullan. `any`, `as unknown as` ve gereksiz `!` (non-null assertion) yasaktır.
@@ -45,7 +45,7 @@ const fetchProducts = async ({ categoryId }: FetchProductsParams): Promise<Produ
 - Side-effect’ler `useEffect` içinde, bağımlılık dizisi eksiksiz.
 
 ## Hata ve Yükleme Yönetimi
-- Her async iş (`fetch`, Modal, Supabase) `try/catch/finally` ile sarmalanır.
+- Her async iş (`fetch`, Supabase) `try/catch/finally` ile sarmalanır.
 - UI üç durumu bilir: `idle | loading | error | success`. Boş `catch {}` yasaktır.
 - Kullanıcıya anlamlı mesaj göster; teknik hatayı logla.
 - Görsel (`Image`) yükleme/hata durumları ele alınır.

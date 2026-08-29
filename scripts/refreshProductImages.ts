@@ -7,7 +7,7 @@ import {
   type ProductImageSource,
 } from './lib/extractProductImage';
 import type { FeedProvider } from '../types/product';
-import type { GarmentCategory } from '../types/vton';
+import type { GarmentCategory } from '../types/product';
 
 loadEnv();
 

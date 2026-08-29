@@ -12,7 +12,7 @@ import type {
   ProductFilters,
   ProductGender,
 } from '../services/productService';
-import type { GarmentCategory } from '../types/vton';
+import type { GarmentCategory } from '../types/product';
 
 const CATEGORY_CHIPS: { value: GarmentCategory; label: string }[] = [
   { value: 'upper_body', label: 'Üst' },

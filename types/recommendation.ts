@@ -1,5 +1,4 @@
-import type { Product } from './product';
-import type { GarmentCategory } from './vton';
+import type { GarmentCategory, Product } from './product';
 
 export interface PriceRange {
   min: number;

@@ -6,7 +6,7 @@
 
 - Tinder benzeri kart yığını: sağa beğen, sola geç
 - Kategori rozetleri: üst giyim, alt giyim, elbise
-- AI sanal deneme (CatVTON, Modal GPU)
+- AI sanal deneme (FASHN Try-On Max, Edge `vton-proxy`)
 - Trendyol ve Hepsiburada derin bağlantıları (kanonikal ürün URL)
 - Supabase ürün feed’i; bağlantı yoksa yerel mock katalog
 - Fiyat takibi (MVP: manuel/script) ve Expo push token kaydı
@@ -19,7 +19,7 @@
 | Jestür / animasyon | Gesture Handler, Reanimated |
 | Durum | Zustand |
 | Veri | PostgreSQL (Supabase), anon RLS okuma |
-| VTON | Modal.com, CatVTON (A10G) |
+| Sanal deneme | FASHN Try-On Max (`1k` / `fast`) via `vton-proxy` |
 | Katalog scriptleri | Node (`tsx`), Cheerio |
 
 ## Mimari
@@ -28,18 +28,14 @@
 Expo (Kabin)  --feed-->  Supabase (products)
        |                      ^
        |                      |  lokal seed / import (service_role)
-       +--try-on-->  Supabase Edge Function (vton-proxy)  --X-Kabin-Secret-->  Modal VTON API
+       +--try-on-->  Supabase Edge Function (vton-proxy)  --Bearer FASHN_API_KEY-->  FASHN Try-On Max
        +--hesap sil--> Supabase Edge Function (delete-account)
        +--Satın Al--> Trendyol / Hepsiburada ürün sayfası
 ```
 
-Uygulama yalnızca `EXPO_PUBLIC_*` değişkenlerini görür. `SUPABASE_SERVICE_ROLE_KEY` cihaza gömülmez.
+Uygulama yalnızca `EXPO_PUBLIC_*` değişkenlerini görür. `SUPABASE_SERVICE_ROLE_KEY` ve `FASHN_API_KEY` cihaza gömülmez.
 
-Modal VTON endpoint'i internete açık olduğu için **istemci Modal'a doğrudan
-gitmez**. `vton-proxy` Edge Function'ı Supabase JWT'sini doğrular, kullanıcı
-başına kotayı (dakikada 3 / günde 20) tüketir ve Modal'a yalnızca
-`X-Kabin-Secret` başlığıyla çağrı yapar. Modal tarafı `/health` dışındaki tüm
-yollarda bu başlığı arar; eksik veya hatalıysa 401 döner.
+Sanal deneme istemcisi FASHN ayrıntılarını görmez. Kota (`consume_vton_quota`, dakikada 3 / günde 20) ve telemetry event isimleri korunur.
 
 ## Kurulum
 
@@ -48,7 +44,6 @@ yollarda bu başlığı arar; eksik veya hatalıysa 401 döner.
 - Node.js 20+
 - npm
 - Expo Go (cihaz) veya Android emülatör
-- (İsteğe bağlı) Modal CLI — VTON deploy için
 - (İsteğe bağlı) Supabase projesi — canlı feed için
 
 ### Ortam değişkenleri
@@ -59,13 +54,11 @@ yollarda bu başlığı arar; eksik veya hatalıysa 401 döner.
 |----------|--------|----------|
 | `EXPO_PUBLIC_SUPABASE_URL` | Uygulama | Supabase proje URL’si |
 | `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Uygulama | Anon / public key (RLS ile okuma) |
-| `EXPO_PUBLIC_VTON_PROXY_URL` | Uygulama | `vton-proxy` Edge Function adresi |
+| `EXPO_PUBLIC_VTON_PROXY_URL` | Uygulama | `recs-feed` / `delete-account` adresini türetmek için hâlâ okunur |
 | `EXPO_PUBLIC_AFFILIATE_TAGS_JSON` | Uygulama | Boş bırakılırsa URL’ye affiliate parametresi eklenmez |
 | `EXPO_PUBLIC_SENTRY_DSN` | Uygulama | Boşsa Sentry **hiç** `init` edilmez. DSN: [sentry.io](https://sentry.io) → Create project → **React Native** → **Client Keys (DSN)** |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yalnızca script | Feed import / seed. `EXPO_PUBLIC_` **olmaz** |
 | `AFFILIATE_TAGS_JSON` | Script | Seed tarafı etiketleri |
-| `KABIN_VTON_SECRET` | Edge Function + Modal | Proxy ↔ Modal paylaşılan sırrı. Uygulamaya **girmez** |
-| `MODAL_VTON_URL` | Edge Function | Modal FastAPI tabanı (`...modal.run`) |
 
 Şema sırası (SQL Editor):
 1. `supabase/schema_products.sql`
@@ -77,8 +70,7 @@ yollarda bu başlığı arar; eksik veya hatalıysa 401 döner.
 
 EAS bulut derlemesi `.env` dosyasını görmez; `EXPO_PUBLIC_*` değerleri
 `eas.json` profillerinin `env` bloğunda olmalı (anon key istemciye zaten
-gömülür). `SUPABASE_SERVICE_ROLE_KEY` ve `KABIN_VTON_SECRET` buraya **asla**
-yazılmaz.
+gömülür). `SUPABASE_SERVICE_ROLE_KEY` buraya **asla** yazılmaz.
 
 ### Auth (e-posta)
 
@@ -93,20 +85,8 @@ kapat; yayında açacaksan kullanıcıya doğrulama bağlantısını açıkça s
 ```bash
 npx supabase login
 npx supabase link --project-ref <PROJECT_REF>
-
-# Proxy ↔ Modal paylaşılan sırrı (Modal tarafındakiyle AYNI dize olmalı)
-npx supabase secrets set KABIN_VTON_SECRET=<sir>
-npx supabase secrets set MODAL_VTON_URL=https://<workspace>--kabin-vton-tryonservice-fastapi-app.modal.run
-
-npx supabase functions deploy vton-proxy
 npx supabase functions deploy delete-account
-```
-
-Modal tarafı:
-
-```bash
-modal secret create kabin-vton-secret KABIN_VTON_SECRET=<ayni-sir>
-modal deploy modal/tryon_api.py
+npx supabase functions deploy recs-feed
 ```
 
 ### Geliştirme sunucusu
@@ -255,9 +235,8 @@ kabin/
 ├── data/                   # mock katalog + sample CSV
 ├── hooks/                  # useAuth + AuthProvider
 ├── lib/                    # tema, hareket, Supabase client, deep link, rıza
-├── modal/                  # CatVTON FastAPI (Modal)
 ├── scripts/                # import, seed, görsel çıkarma
-├── services/               # feed, VTON, hesap, satın al
+├── services/               # feed, hesap, satın al
 ├── store/                  # Zustand
 ├── supabase/               # SQL şema + Edge Functions
 └── types/
@@ -300,4 +279,4 @@ bölümünde yayınlanır ve Play Console "Veri silme" alanına bu URL girilir.
 
 ## Güvenlik
 
-Ayrıntı: [SECURITY.md](SECURITY.md). `.env` commit edilmez. Service role anahtarı uygulama paketinde yer almaz. Modal VTON endpoint'ine yalnızca `vton-proxy` Edge Function'ı üzerinden, kimliği doğrulanmış kullanıcı adına erişilir.
+Ayrıntı: [SECURITY.md](SECURITY.md). `.env` commit edilmez. Service role anahtarı uygulama paketinde yer almaz.

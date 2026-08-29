@@ -16,7 +16,6 @@ import {
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -45,10 +44,11 @@ import {
 import PressableScale from './PressableScale';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuthContext } from '../hooks/useAuthContext';
+import { track } from '../lib/analytics';
 import { grantVtonConsent, hasVtonConsent } from '../lib/consent';
 import { hapticSuccess } from '../lib/haptics';
 import { logger } from '../lib/logger';
-import { track } from '../lib/analytics';
+import { checkLowResolutionPersonPhoto } from '../lib/personPhotoPrepare';
 import { recordSessionProductAction } from '../lib/sessionIntent';
 import { LEGACY_RECOMMENDATION_ID } from '../types/analytics';
 import {
@@ -59,19 +59,15 @@ import {
 } from '../lib/motion';
 import { PRIVACY_URL } from '../lib/privacy';
 import { colors, radius, spacing } from '../lib/theme';
+import { LOW_RES_MODEL_PHOTO_HINT } from '../lib/vtonPersonImage';
 import { buildTryOnShareMessage } from '../lib/vtonShare';
 import { openProductPage } from '../services/deeplinkService';
 import { insertLikedProduct } from '../services/likeService';
 import { resolveSavedModelPhotoUri } from '../services/profileService';
-import {
-  tryOnGarment,
-  VtonServiceError,
-} from '../services/vtonService';
+import { tryOnGarment, VtonServiceError } from '../services/vtonService';
 import { useAppStore } from '../store/useAppStore';
 import type { Product } from '../types/product';
-import type { TryOnStatus } from '../types/vton';
 
-const IMAGE_MAX_WIDTH = 768;
 const ICON_SIZE = 16;
 const GARMENT_THUMB_SIZE = 36;
 const GARMENT_THUMB_RADIUS = 12;
@@ -110,6 +106,8 @@ const FOOTER_CHROME_HEIGHT = 80;
 const PINCH_RESET_SPRING = { damping: 16, stiffness: 220 } as const;
 
 type ConsentStatus = 'checking' | 'required' | 'granted';
+
+type TryOnStatus = 'idle' | 'loading' | 'error' | 'success';
 
 export interface VirtualTryOnModalProps {
   visible: boolean;
@@ -154,6 +152,7 @@ export default function VirtualTryOnModal({
   const [status, setStatus] = useState<TryOnStatus>('idle');
   const [errorMessage, setErrorMessage] = useState(resetMessage);
   const [personImageUri, setPersonImageUri] = useState<string | null>(null);
+  const [isPersonPhotoLowRes, setIsPersonPhotoLowRes] = useState(false);
   const [resultImageUrl, setResultImageUrl] = useState<string | null>(null);
   const [consentStatus, setConsentStatus] = useState<ConsentStatus>('checking');
   const [isRendered, setIsRendered] = useState(visible);
@@ -240,6 +239,26 @@ export default function VirtualTryOnModal({
       isMounted = false;
     };
   }, [consentStatus, user?.id, visible]);
+
+  useEffect(() => {
+    if (!personImageUri) {
+      setIsPersonPhotoLowRes(false);
+      return;
+    }
+    let isMounted = true;
+    void checkLowResolutionPersonPhoto(personImageUri)
+      .then((lowRes) => {
+        if (isMounted) {
+          setIsPersonPhotoLowRes(lowRes);
+        }
+      })
+      .catch((error: unknown) => {
+        logger.warn('Model fotoğrafı boyutu okunamadı', { error });
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [personImageUri]);
 
   useEffect(() => {
     if (status === 'loading') {
@@ -419,6 +438,7 @@ export default function VirtualTryOnModal({
     setStatus('idle');
     setErrorMessage(resetMessage);
     setPersonImageUri(null);
+    setIsPersonPhotoLowRes(false);
     setResultImageUrl(null);
     setIsImmersive(false);
     setClosetAdded(false);
@@ -545,27 +565,14 @@ export default function VirtualTryOnModal({
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [3, 4],
-        quality: 0.8,
+        allowsEditing: false,
       });
 
       if (result.canceled || !result.assets[0]) {
         return;
       }
 
-      const asset = result.assets[0];
-      const actions =
-        asset.width > IMAGE_MAX_WIDTH
-          ? [{ resize: { width: IMAGE_MAX_WIDTH } }]
-          : [];
-
-      const prepared = await ImageManipulator.manipulateAsync(asset.uri, actions, {
-        compress: 0.8,
-        format: ImageManipulator.SaveFormat.JPEG,
-      });
-
-      setPersonImageUri(prepared.uri);
+      setPersonImageUri(result.assets[0].uri);
       setResultImageUrl(null);
       setErrorMessage(resetMessage);
       setStatus('idle');
@@ -593,8 +600,6 @@ export default function VirtualTryOnModal({
 
     try {
       const outputUrl = await tryOnGarment(personImageUri, product.imageUrl, {
-        garmentDescription: product.garmentDescription,
-        category: product.category,
         productId: product.id,
         productTitle: product.title,
         productUrl: product.productUrl,
@@ -791,8 +796,7 @@ export default function VirtualTryOnModal({
                 </Text>
                 <Text style={styles.consentItem}>
                   • Seçtiğin fotoğraf, giydirme işlemini yapan yapay zekâ
-                  servisimize (Modal.com, GPU) şifreli bağlantı üzerinden
-                  gönderilir.
+                  servisimize şifreli bağlantı üzerinden gönderilir.
                 </Text>
                 <Text style={styles.consentItem}>
                   • İşlem bittiğinde fotoğraf sunucuda tutulmaz; sonuç görseli
@@ -871,7 +875,7 @@ export default function VirtualTryOnModal({
                 <Image
                   source={{ uri: canvasUri }}
                   style={styles.canvasImage}
-                  contentFit="cover"
+                  contentFit="contain"
                   cachePolicy="none"
                   recyclingKey={canvasUri}
                 />
@@ -884,9 +888,13 @@ export default function VirtualTryOnModal({
               <ImageIcon color={colors.textSecondary} size={42} />
               <Text style={styles.placeholderTitle}>Fotoğrafını seç</Text>
               <Text style={styles.placeholderHint}>
-                Ayakta, net ve mümkünse 3:4 oranlı bir kare en iyi sonucu verir.
+                Ayakta, net ve tam boy bir fotoğraf seç. Orijinal kadraj korunur.
               </Text>
             </View>
+          ) : null}
+
+          {isPersonPhotoLowRes && personImageUri && status === 'idle' ? (
+            <Text style={styles.lowResHint}>{LOW_RES_MODEL_PHOTO_HINT}</Text>
           ) : null}
 
           {status === 'error' ? (
@@ -1185,6 +1193,17 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 14,
     lineHeight: 21,
+    textAlign: 'center',
+  },
+  lowResHint: {
+    position: 'absolute',
+    left: spacing.md,
+    right: spacing.md,
+    bottom: spacing.md,
+    zIndex: 3,
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
     textAlign: 'center',
   },
   centerBlock: {

@@ -31,8 +31,10 @@ import { useAuthContext } from '../../hooks/useAuthContext';
 import { hapticSwipeDecision } from '../../lib/haptics';
 import { buildInviteShareMessage } from '../../lib/inviteShare';
 import { logger } from '../../lib/logger';
+import { checkLowResolutionPersonPhoto } from '../../lib/personPhotoPrepare';
 import { PRIVACY_URL, SUPPORT_EMAIL } from '../../lib/privacy';
 import { colors, radius, spacing } from '../../lib/theme';
+import { LOW_RES_MODEL_PHOTO_HINT } from '../../lib/vtonPersonImage';
 import { deleteAccount } from '../../services/accountService';
 import {
   createModelPhotoSignedUrl,
@@ -114,6 +116,7 @@ export default function ProfileScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [studio, setStudio] = useState<UserStudioProfile | null>(null);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [isModelPhotoLowRes, setIsModelPhotoLowRes] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [sizeOpen, setSizeOpen] = useState(false);
@@ -152,8 +155,15 @@ export default function ProfileScreen() {
       if (profile.modelPhotoPath) {
         const signed = await createModelPhotoSignedUrl(profile.modelPhotoPath);
         setPhotoUri(signed);
+        if (signed) {
+          const lowRes = await checkLowResolutionPersonPhoto(signed);
+          setIsModelPhotoLowRes(lowRes);
+        } else {
+          setIsModelPhotoLowRes(false);
+        }
       } else {
         setPhotoUri(null);
+        setIsModelPhotoLowRes(false);
       }
     } catch (error) {
       logger.error('Stüdyo profili yüklenemedi', { error });
@@ -174,6 +184,7 @@ export default function ProfileScreen() {
     if (!userId) {
       setStudio(null);
       setPhotoUri(null);
+      setIsModelPhotoLowRes(false);
     }
   }, [userId]);
 
@@ -215,9 +226,7 @@ export default function ProfileScreen() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [3, 4],
-        quality: 0.8,
+        allowsEditing: false,
       });
       if (result.canceled || !result.assets[0]) {
         return;
@@ -230,6 +239,8 @@ export default function ProfileScreen() {
       });
       setStudio(next);
       setPhotoUri(result.assets[0].uri);
+      const lowRes = await checkLowResolutionPersonPhoto(result.assets[0].uri);
+      setIsModelPhotoLowRes(lowRes);
       hapticSwipeDecision();
     } catch (error) {
       logger.error('Model fotoğrafı yüklenemedi', { error });
@@ -253,6 +264,7 @@ export default function ProfileScreen() {
       const next = await removeModelPhoto(userId);
       setStudio(next);
       setPhotoUri(null);
+      setIsModelPhotoLowRes(false);
       hapticSwipeDecision();
     } catch (error) {
       logger.error('Model fotoğrafı kaldırılamadı', { error });
@@ -457,6 +469,9 @@ export default function ProfileScreen() {
             <Text style={styles.editButtonText}>Düzenle</Text>
           </PressableScale>
         </View>
+        {isModelPhotoLowRes ? (
+          <Text style={styles.lowResHint}>{LOW_RES_MODEL_PHOTO_HINT}</Text>
+        ) : null}
 
         <LinearGradient
           colors={[colors.accentSoft, colors.surface]}
@@ -625,6 +640,12 @@ const styles = StyleSheet.create({
   error: {
     color: colors.destructive,
     fontWeight: '600',
+  },
+  lowResHint: {
+    color: colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
   },
   heroRow: {
     flexDirection: 'row',

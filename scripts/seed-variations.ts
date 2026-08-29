@@ -7,7 +7,7 @@
  */
 import { config as loadEnv } from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import type { GarmentCategory } from '../types/vton';
+import type { GarmentCategory } from '../types/product';
 
 loadEnv();
 

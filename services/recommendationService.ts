@@ -5,7 +5,7 @@ import type {
   PriceRange,
   UserPreferences,
 } from '../types/recommendation';
-import type { GarmentCategory } from '../types/vton';
+import type { GarmentCategory } from '../types/product';
 
 interface PreferenceSignal {
   category: GarmentCategory;
