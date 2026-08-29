@@ -1,4 +1,4 @@
-import { CARD_SHADOW_SPREAD_PX } from '../lib/theme';
+import { CARD_SHADOW_SPREAD_PX, layout } from '../lib/theme';
 import {
   DECK_OPACITY_BY_DEPTH,
   DECK_PEEK_STEP_PX,
@@ -122,18 +122,19 @@ describe('stack geometry', () => {
     expect(pose.opacity).toBe(1);
   });
 
-  it('yalnız bir arka kart örtülü durur; 2. arka kart gizli', () => {
+  it('arka kartlar alt kenarda şerit bırakır; 2. katman da görünür', () => {
     expect(bottomEdge(1)).toBeCloseTo(DECK_PEEK_STEP_PX, 5);
-    expect(bottomEdge(1)).toBe(0);
+    expect(bottomEdge(2)).toBeCloseTo(DECK_PEEK_STEP_PX * 2, 5);
     expect(getStackPose(1, CARD_H).opacity).toBe(DECK_OPACITY_BY_DEPTH[1]);
-    expect(getStackPose(1, CARD_H).scale).toBe(0.995);
-    expect(getStackPose(2, CARD_H).opacity).toBe(0);
-    expect(getStackPose(9, CARD_H).opacity).toBe(0);
+    expect(getStackPose(1, CARD_H).scale).toBe(DECK_SCALE_BY_DEPTH[1]);
+    expect(getStackPose(2, CARD_H).opacity).toBe(DECK_OPACITY_BY_DEPTH[2]);
+    expect(getStackPose(9, CARD_H).opacity).toBe(DECK_OPACITY_BY_DEPTH[2]);
   });
 
-  it('kenar payı deck padding’ini aşmaz', () => {
-    expect(bottomEdge(1)).toBeLessThanOrEqual(12);
-    expect(DECK_PEEK_STEP_PX).toBe(0);
+  it('kenar payı peek adımıyla hizalıdır', () => {
+    expect(bottomEdge(1)).toBeLessThanOrEqual(layout.deckPeekStepMax);
+    expect(DECK_PEEK_STEP_PX).toBeGreaterThanOrEqual(layout.deckPeekStepMin);
+    expect(DECK_PEEK_STEP_PX).toBeLessThanOrEqual(layout.deckPeekStepMax);
   });
 
   it('taşan derinlik son basamağa sabitlenir', () => {
@@ -150,15 +151,15 @@ describe('stack geometry', () => {
 });
 
 describe('deck rest pose', () => {
-  it('öndeki kart opak; arka katmanların kenarı yok', () => {
+  it('öndeki kart opak; arka katmanlar düşük opaklıkta görünür', () => {
     expect(DECK_OPACITY_BY_DEPTH[0]).toBe(1);
-    expect(DECK_OPACITY_BY_DEPTH[1]).toBe(0);
-    expect(DECK_OPACITY_BY_DEPTH[2]).toBe(0);
+    expect(DECK_OPACITY_BY_DEPTH[1]).toBeCloseTo(0.6, 5);
+    expect(DECK_OPACITY_BY_DEPTH[2]).toBeCloseTo(0.35, 5);
   });
 
-  it('görünür arka kart neredeyse tam örtülü (0.99–0.998)', () => {
-    expect(DECK_SCALE_BY_DEPTH[1]).toBeGreaterThanOrEqual(0.99);
-    expect(DECK_SCALE_BY_DEPTH[1]).toBeLessThanOrEqual(0.998);
+  it('görünür arka kart hafif küçülür (0.96–0.98)', () => {
+    expect(DECK_SCALE_BY_DEPTH[1]).toBeGreaterThanOrEqual(0.96);
+    expect(DECK_SCALE_BY_DEPTH[1]).toBeLessThanOrEqual(0.98);
   });
 
   it('scale basamakları teleport etmeyecek kadar dar', () => {
@@ -167,6 +168,8 @@ describe('deck rest pose', () => {
     expect(DECK_SCALE_BY_DEPTH[0] - DECK_SCALE_BY_DEPTH[1]).toBeLessThanOrEqual(
       0.04,
     );
+    expect(DECK_SCALE_BY_DEPTH[1]).toBeCloseTo(0.98, 5);
+    expect(DECK_SCALE_BY_DEPTH[2]).toBeCloseTo(0.96, 5);
   });
 
   it('promotion spring overshoot kapatır', () => {

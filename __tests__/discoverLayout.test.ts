@@ -1,4 +1,5 @@
 import {
+  deckPeekStepForHeight,
   discoverCardLiftForHeight,
   estimateDiscoverCardHeight,
   headerToDeckForHeight,
@@ -51,5 +52,15 @@ describe('discover layout', () => {
     expect(layout.segmentHeight).toBeGreaterThanOrEqual(34);
     expect(layout.segmentHeight).toBeLessThanOrEqual(38);
     expect(layout.deckPadding).toBeGreaterThanOrEqual(12);
+  });
+
+  it('deste peek adımı kısa ekranda 4px, uzunda 6px’dir', () => {
+    expect(deckPeekStepForHeight(640)).toBe(layout.deckPeekStepMin);
+    expect(deckPeekStepForHeight(1536)).toBe(layout.deckPeekStepMax);
+    expect(layout.deckPeekStepMin).toBe(4);
+    expect(layout.deckPeekStepMax).toBe(6);
+    expect(layout.deckPeekStep).toBe(4);
+    expect(layout.deckPeekStepMax).toBeLessThanOrEqual(12);
+    expect(layout.deckPeekStepMin).toBeGreaterThanOrEqual(4);
   });
 });

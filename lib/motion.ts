@@ -1,4 +1,4 @@
-import { CARD_SHADOW_SPREAD_PX } from './theme';
+import { CARD_SHADOW_SPREAD_PX, layout } from './theme';
 
 /** Ortak süreler: JS thread’de interpolasyon yok, hepsi Reanimated worklet’e gider. */
 export const PRESS_SCALE = 0.95;
@@ -7,13 +7,17 @@ export const PRESS_DURATION_MS = 100;
 export const TAB_TRANSITION_MS = 200;
 export const STACK_TRANSITION_MS = 200;
 
-/** Deste hissi: önde 1 kart; arka katmanlar mount kalır, görünmez. */
+/** Deste hissi: önde 1 kart; 2 arka katman ince şerit + düşük opaklık. */
 export const DECK_VISIBLE_COUNT = 3;
-export const DECK_SCALE_BY_DEPTH = [1, 0.995, 0.99];
-/** Alt kenarda ayrı kart şeridi yok. */
-export const DECK_PEEK_STEP_PX = 0;
-/** Ana kart opak; arka kartların kenarı idle’da yok. */
-export const DECK_OPACITY_BY_DEPTH = [1, 0, 0];
+export const DECK_SCALE_BY_DEPTH: readonly [number, number, number] = [
+  1, 0.98, 0.96,
+];
+/** Alt kenar şeridi: tema token (4); runtime kısa/uzun ekranda 4–6. */
+export const DECK_PEEK_STEP_PX = layout.deckPeekStep;
+/** Ana kart opak; arka katmanlar sakin, yarışmaz. */
+export const DECK_OPACITY_BY_DEPTH: readonly [number, number, number] = [
+  1, 0.6, 0.35,
+];
 export const DECK_SPRING = { damping: 18, stiffness: 200, mass: 0.7 } as const;
 /** Promotion: kısa, overshoot yok — “yeni kart doğdu” hissi yok. */
 export const DECK_PROMOTE_SPRING = {
@@ -64,12 +68,16 @@ export interface StackPose {
  * Destenin TEK geometri kaynağı. JS thread’de çalışır (worklet değil): Reanimated 4
  * `as const`/dinamik dizi indeksini UI thread’e kopyalayamaz, açılışta çöker.
  */
-export const getStackPose = (depth: number, cardHeightPx: number): StackPose => {
-  const step = depth <= 0 ? 0 : depth >= 2 ? 2 : 1;
-  const scale = step === 0 ? 1 : step === 1 ? 0.995 : 0.99;
-  const opacity = step === 0 ? 1 : 0;
+export const getStackPose = (
+  depth: number,
+  cardHeightPx: number,
+  peekStepPx: number = DECK_PEEK_STEP_PX,
+): StackPose => {
+  const step: 0 | 1 | 2 = depth <= 0 ? 0 : depth === 1 ? 1 : 2;
+  const scale = DECK_SCALE_BY_DEPTH[step];
+  const opacity = DECK_OPACITY_BY_DEPTH[step];
   const shrinkCompensation = ((1 - scale) * cardHeightPx) / 2;
-  const peek = step === 1 ? DECK_PEEK_STEP_PX : 0;
+  const peek = step * peekStepPx;
   return {
     scale,
     translateY: peek + shrinkCompensation,

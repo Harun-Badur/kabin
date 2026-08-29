@@ -38,6 +38,7 @@ import {
 import { hasSeenSwipeHint, markSwipeHintSeen } from '../../lib/onboarding';
 import {
   colors,
+  deckPeekStepForHeight,
   discoverCardLiftForHeight,
   headerToDeckForHeight,
   layout,
@@ -76,9 +77,7 @@ interface DeckSlot {
   role: DeckRole;
 }
 
-/** Tüm slotlar aynı kart çerçevesini paylaşır; poz merkezi fonksiyondan gelir. */
-const FRONT_POSE = getStackPose(0, SWIPE_CARD_HEIGHT);
-const BEHIND_POSE = getStackPose(1, SWIPE_CARD_HEIGHT);
+/** Tüm slotlar aynı kart çerçevesini paylaşır; poz peekStep ile hesaplanır. */
 const UNDO_PARK_Y = getUndoParkY(SWIPE_CARD_HEIGHT);
 const UNDO_RETURN_TRAVEL_PX = deckClearTravelPx(SWIPE_CARD_HEIGHT);
 
@@ -89,6 +88,7 @@ interface StackSlotProps {
   isTop: boolean;
   canLike: boolean;
   canUndo: boolean;
+  peekStepPx: number;
   deckPullY: SharedValue<number>;
   onAddToCloset: (product: Product) => void;
   onPass: (product: Product) => void;
@@ -158,6 +158,7 @@ function StackSlot({
   isTop,
   canLike,
   canUndo,
+  peekStepPx,
   deckPullY,
   onAddToCloset,
   onPass,
@@ -170,7 +171,7 @@ function StackSlot({
 }: StackSlotProps) {
   const isPeek = role === 'peek';
   const isExiting = role === 'exiting';
-  const initialPose = getStackPose(depth, SWIPE_CARD_HEIGHT);
+  const initialPose = getStackPose(depth, SWIPE_CARD_HEIGHT, peekStepPx);
   const scale = useSharedValue(initialPose.scale);
   const translateY = useSharedValue(initialPose.translateY);
   const opacity = useSharedValue(initialPose.opacity);
@@ -178,11 +179,18 @@ function StackSlot({
   const returnY = useSharedValue(0);
   const wasPeek = useRef(isPeek);
   const previousDepth = useRef(depth);
-  const frontScale = FRONT_POSE.scale;
-  const frontTranslateY = FRONT_POSE.translateY;
-  const frontOpacity = FRONT_POSE.opacity;
-  const behindScale = BEHIND_POSE.scale;
-  const behindTranslateY = BEHIND_POSE.translateY;
+  const frontPose = getStackPose(0, SWIPE_CARD_HEIGHT, peekStepPx);
+  const behindPose = getStackPose(1, SWIPE_CARD_HEIGHT, peekStepPx);
+  const buriedPose = getStackPose(2, SWIPE_CARD_HEIGHT, peekStepPx);
+  const frontScale = frontPose.scale;
+  const frontTranslateY = frontPose.translateY;
+  const frontOpacity = frontPose.opacity;
+  const behindScale = behindPose.scale;
+  const behindTranslateY = behindPose.translateY;
+  const behindOpacity = behindPose.opacity;
+  const buriedScale = buriedPose.scale;
+  const buriedTranslateY = buriedPose.translateY;
+  const buriedOpacity = buriedPose.opacity;
   const undoParkY = UNDO_PARK_Y;
 
   useLayoutEffect(() => {
@@ -191,7 +199,7 @@ function StackSlot({
       previousDepth.current = depth;
       return;
     }
-    const pose = getStackPose(depth, SWIPE_CARD_HEIGHT);
+    const pose = getStackPose(depth, SWIPE_CARD_HEIGHT, peekStepPx);
     if (wasPeek.current) {
       // Undo settle'da kart zaten ön pozda. Park Y'den spring-in, clip üstünden
       // bir kare flash olarak düşer.
@@ -206,13 +214,27 @@ function StackSlot({
       if (lift > 0) {
         scale.value = lerp(behindScale, frontScale, lift);
         translateY.value = lerp(behindTranslateY, frontTranslateY, lift);
-        opacity.value = frontOpacity;
+        opacity.value = lerp(behindOpacity, frontOpacity, lift);
+      }
+    }
+    if (depth === 1 && previousDepth.current === 2) {
+      const lift = passProgress(deckPullY.value);
+      if (lift > 0) {
+        scale.value = lerp(buriedScale, behindScale, lift);
+        translateY.value = lerp(buriedTranslateY, behindTranslateY, lift);
+        opacity.value = lerp(buriedOpacity, behindOpacity, lift);
       }
     }
     if (depth === 1 && previousDepth.current === 0) {
       // Undo commit'inde iniş tamamlanmıştı; spring hedefi zaten burası.
       scale.value = behindScale;
       translateY.value = behindTranslateY;
+      opacity.value = behindOpacity;
+    }
+    if (depth === 2 && previousDepth.current === 1) {
+      scale.value = buriedScale;
+      translateY.value = buriedTranslateY;
+      opacity.value = buriedOpacity;
     }
     wasPeek.current = false;
     previousDepth.current = depth;
@@ -220,8 +242,12 @@ function StackSlot({
     translateY.value = withSpring(pose.translateY, DECK_PROMOTE_SPRING);
     opacity.value = withSpring(pose.opacity, DECK_PROMOTE_SPRING);
   }, [
+    behindOpacity,
     behindScale,
     behindTranslateY,
+    buriedOpacity,
+    buriedScale,
+    buriedTranslateY,
     deckPullY,
     depth,
     frontOpacity,
@@ -230,6 +256,7 @@ function StackSlot({
     isExiting,
     isPeek,
     opacity,
+    peekStepPx,
     returnY,
     scale,
     translateY,
@@ -272,8 +299,22 @@ function StackSlot({
     }
     if (depth === 1) {
       const lift = passProgress(deckPullY.value);
+      const sink = undoReturnProgress(deckPullY.value, UNDO_RETURN_TRAVEL_PX);
+      if (sink > 0) {
+        return {
+          opacity: interpolate(sink, [0, 1], [opacity.value, buriedOpacity]),
+          transform: [
+            {
+              translateY:
+                returnY.value +
+                interpolate(sink, [0, 1], [translateY.value, buriedTranslateY]),
+            },
+            { scale: interpolate(sink, [0, 1], [scale.value, buriedScale]) },
+          ],
+        };
+      }
       return {
-        opacity: opacity.value,
+        opacity: interpolate(lift, [0, 1], [opacity.value, frontOpacity]),
         transform: [
           {
             translateY:
@@ -284,11 +325,16 @@ function StackSlot({
         ],
       };
     }
+    const lift = passProgress(deckPullY.value);
     return {
-      opacity: opacity.value,
+      opacity: interpolate(lift, [0, 1], [opacity.value, behindOpacity]),
       transform: [
-        { translateY: returnY.value + translateY.value },
-        { scale: scale.value },
+        {
+          translateY:
+            returnY.value +
+            interpolate(lift, [0, 1], [translateY.value, behindTranslateY]),
+        },
+        { scale: interpolate(lift, [0, 1], [scale.value, behindScale]) },
       ],
     };
   });
@@ -312,7 +358,7 @@ function StackSlot({
       isExiting={isExiting}
       canLike={canLike}
       canUndo={canUndo}
-      castShadow={isTop}
+      castShadow={role !== 'peek'}
       deckPullY={isTop ? deckPullY : undefined}
       onAddToCloset={onAddToCloset}
       onPass={onPass}
@@ -364,6 +410,8 @@ export default function FeedScreen() {
   const { height: windowHeight } = useWindowDimensions();
   const headerToDeckPx = headerToDeckForHeight(windowHeight);
   const discoverCardLiftPx = discoverCardLiftForHeight(windowHeight);
+  const peekStepPx = deckPeekStepForHeight(windowHeight);
+  const peekBandPx = peekStepPx * (DECK_VISIBLE_COUNT - 1);
   const { user } = useAuthContext();
   const currentProducts = useAppStore((state) => state.currentProducts);
   const feedStatus = useAppStore((state) => state.feedStatus);
@@ -714,7 +762,13 @@ export default function FeedScreen() {
             onOpenLiked={handleOpenLiked}
           />
         ) : (
-          <View style={styles.deckClip} collapsable={false}>
+          <View
+            style={[
+              styles.deckClip,
+              { marginBottom: -peekBandPx, paddingBottom: peekBandPx },
+            ]}
+            collapsable={false}
+          >
             <View style={styles.deck}>
               {deckSlots.map(({ product, depth, role }) => (
                 <StackSlot
@@ -725,6 +779,7 @@ export default function FeedScreen() {
                   isTop={role === 'stack' && depth === 0}
                   canLike={canLike}
                   canUndo={lastPassed !== null}
+                  peekStepPx={peekStepPx}
                   deckPullY={deckPullY}
                   onAddToCloset={handleSwipeRight}
                   onPass={handleSwipeLeft}
@@ -860,7 +915,7 @@ const styles = StyleSheet.create({
   deck: {
     flex: 1,
     width: '100%',
-    overflow: 'hidden',
+    overflow: 'visible',
     justifyContent: 'center',
   },
   stackSlot: {

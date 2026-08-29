@@ -88,6 +88,10 @@ export const layout = {
   segmentInset: spacing.xs,
   segmentOptionPaddingX: spacing.lg,
   deckPadding: spacing.md,
+  /** Discover deste: arka kart şeridi (px / derinlik). 4; uzun ekranda 6. */
+  deckPeekStep: 4,
+  deckPeekStepMin: 4,
+  deckPeekStepMax: 6,
   tabBarContentHeight: 60,
   tabBarFallbackPadding: spacing.md,
   ctaPaddingVertical: 10,
@@ -104,6 +108,12 @@ export const headerToDeckForHeight = (screenHeight: number): number =>
   screenHeight >= layout.headerToDeckTallScreen
     ? layout.headerToDeck
     : layout.headerToDeckMin;
+
+/** Arka kart şeridi: kısa ekranda 4px, uzun ekranda 6px. */
+export const deckPeekStepForHeight = (screenHeight: number): number =>
+  screenHeight >= layout.headerToDeckTallScreen
+    ? layout.deckPeekStepMax
+    : layout.deckPeekStepMin;
 
 /**
  * Header sıkışınca kart boyutu değişmesin: aynı pay tab bar üstünde kalır.
